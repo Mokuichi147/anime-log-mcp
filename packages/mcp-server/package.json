@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@annict-mcp/annict-client": "*",
+    "@cloudflare/workers-oauth-provider": "^0.8.2",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "agents": "^0.0.100",
     "zod": "^3.24.0"

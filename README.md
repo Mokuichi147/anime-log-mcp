@@ -15,64 +15,91 @@ npmで公開されている `annict` パッケージはREST API v1をラップ�
 npm install
 ```
 
-### 2. Annict Personal Access Tokenの取得
+### 2. Annict OAuthアプリケーションの登録
 
-1. https://annict.com/settings/apps を開く
-2. 「個人用アクセストークン」から新規トークンを発行(読み取り専用/読み書き のスコープを選択)
-3. 発行されたトークンは一度しか表示されないため控えておく
+1. https://annict.com/oauth/applications を開き、アプリケーションを新規作成する
+2. **Redirect URI** に `https://<your-worker>.workers.dev/callback` を設定する
+   - ローカル開発でも試す場合は `http://localhost:8787/callback` も追加する
+3. 発行された **Client ID** と **Client Secret** を控える
 
-### 3. ローカル開発用のシークレット設定
+このアプリケーションはデプロイ全体で1つだけ登録します。利用者ごとに登録する必要はありません。
 
-`packages/mcp-server/.dev.vars.example` を `packages/mcp-server/.dev.vars` にコピーし、取得したトークンを設定します(`.dev.vars` は `.gitignore` 済みでコミットされません)。
+### 3. KV namespaceの作成
 
-```sh
-cp packages/mcp-server/.dev.vars.example packages/mcp-server/.dev.vars
-```
-
-```
-ANNICT_ACCESS_TOKEN=your_personal_access_token_here
-MCP_AUTH_TOKEN=
-```
-
-`MCP_AUTH_TOKEN` は**必須**です。MCPサーバーへのリクエストには `Authorization: Bearer <MCP_AUTH_TOKEN>` ヘッダーが必要になります。値は自分で生成してください(例: `openssl rand -hex 32`)。
-
-デプロイ後のWorker URLはデフォルトで公開されます。このサーバーは書き込み権限を持つAnnictトークンを保持しているため、`MCP_AUTH_TOKEN` が未設定のままだとURLを知った第三者があなたのAnnictアカウントに書き込めてしまいます。未設定の場合はリクエストを `500` で拒否します。
-
-### 4. ローカル起動
+OAuthのグラント・トークン・クライアント登録の保存先です。
 
 ```sh
-npm run dev
+npx wrangler kv namespace create OAUTH_KV --config packages/mcp-server/wrangler.jsonc
 ```
 
-`http://localhost:8787/mcp` でMCPサーバー(Streamable HTTPトランスポート)が起動します。動作確認には [MCP Inspector](https://github.com/modelcontextprotocol/inspector) か、以下のcurlが利用できます。
+出力された `id` を `packages/mcp-server/wrangler.jsonc` の `kv_namespaces` に反映してください。
 
-Streamable HTTPでは `initialize` 以外のリクエストに `Mcp-Session-Id` ヘッダーが必須なので、まず `initialize` でセッションIDを取得します。
+### 4. シークレットの設定
 
 ```sh
-# 1. initialize してレスポンスヘッダー mcp-session-id を取得
-curl -i -X POST http://localhost:8787/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
-
-# 2. 取得したセッションIDを付けて tools/list
-curl -X POST http://localhost:8787/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
-  -H "Mcp-Session-Id: <1で取得したID>" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+# 本番
+npx wrangler secret put ANNICT_CLIENT_ID --config packages/mcp-server/wrangler.jsonc
+npx wrangler secret put ANNICT_CLIENT_SECRET --config packages/mcp-server/wrangler.jsonc
 ```
 
-### 5. デプロイ
+ローカル開発では `packages/mcp-server/.dev.vars` に記述します(`.gitignore` 済み)。
+
+```
+ANNICT_CLIENT_ID=your_client_id
+ANNICT_CLIENT_SECRET=your_client_secret
+```
+
+ここで設定するのは**アプリケーションの身元**であって、利用者の資格情報ではありません。利用者のAnnictトークンはOAuthフローで個別に取得され、grantに紐付けて保存されます。
+
+### 5. 起動とデプロイ
 
 ```sh
-npx wrangler secret put ANNICT_ACCESS_TOKEN --config packages/mcp-server/wrangler.jsonc
-npx wrangler secret put MCP_AUTH_TOKEN --config packages/mcp-server/wrangler.jsonc
-
+npm run dev     # http://localhost:8787
 npm run deploy
 ```
+
+### 6. MCPクライアントからの接続
+
+OAuthに対応したMCPクライアントであれば、URLを登録するだけです。クライアントが自動的に認可フローを開始します。
+
+```json
+{
+  "mcpServers": {
+    "annict": {
+      "url": "https://<your-worker>.workers.dev/mcp"
+    }
+  }
+}
+```
+
+初回接続時、ブラウザで以下が順に表示されます。
+
+1. 本サーバーの同意画面(どのMCPクライアントに許可するかを確認)
+2. Annictのログイン・認可画面
+
+承認後、クライアントには**本サーバーが発行したトークン**が渡されます。Annictのトークンがクライアントに渡ることはありません。
+
+## 認証の仕組み
+
+このサーバーは2つの役割を持ちます。
+
+- **MCPクライアントに対して**: 認可サーバー兼リソースサーバー。自前のアクセストークンを発行・検証する
+- **Annictに対して**: 単一のOAuthクライアント。利用者ごとのAnnictトークンを取得し、grantに紐付けて保持する
+
+```
+ユーザーA ──┐                                        ┌── Annict (Aのトークン)
+ユーザーB ──┼── 1つのデプロイ ── 1つのOAuthアプリ ──┼── Annict (Bのトークン)
+ユーザーC ──┘                                        └── Annict (Cのトークン)
+```
+
+1つのデプロイを複数の利用者が共有でき、各自が自分のAnnictアカウントを操作します。
+
+Annictトークンはgrantに紐付いた `props` として保存され、[`@cloudflare/workers-oauth-provider`](https://github.com/cloudflare/workers-oauth-provider) がアクセストークンを鍵材料として暗号化します。ストレージを読めるだけでは復元できません。
+
+> [!IMPORTANT]
+> ただし、リクエスト処理中はサーバーのコード上で復号された状態のAnnictトークンが利用可能です。**デプロイした運営者は、利用者のAnnictアカウントとして操作できます。** これはホスティング型サービス一般と同じ信頼関係であり、構造的な回避策はありません。自分以外に使わせる場合はこの点を明示してください。
+
+Annictに要求するスコープは `read write` です(視聴記録の作成・ステータス更新のため)。
 
 ## 提供ツール
 

@@ -9,6 +9,12 @@
       { "name": "MCP_OBJECT", "class_name": "AnnictMcpAgent" }
     ]
   },
+  // Stores OAuth grants, tokens and client registrations. Replace "id" with the
+  // namespace created by `npx wrangler kv namespace create OAUTH_KV` before
+  // deploying; `wrangler dev` simulates it locally regardless of the value.
+  "kv_namespaces": [
+    { "binding": "OAUTH_KV", "id": "replace-with-your-kv-namespace-id" }
+  ],
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["AnnictMcpAgent"] }
   ],
