@@ -31,10 +31,12 @@ cp packages/mcp-server/.dev.vars.example packages/mcp-server/.dev.vars
 
 ```
 ANNICT_ACCESS_TOKEN=your_personal_access_token_here
-MCP_AUTH_TOKEN=optional_shared_secret_for_bearer_auth
+MCP_AUTH_TOKEN=
 ```
 
-`MCP_AUTH_TOKEN` は任意です。設定した場合、MCPサーバーへのリクエストに `Authorization: Bearer <MCP_AUTH_TOKEN>` ヘッダーが必須になります。デプロイ後のWorker URLはデフォルトで公開されるため、本番運用時は設定を推奨します。
+`MCP_AUTH_TOKEN` は**必須**です。MCPサーバーへのリクエストには `Authorization: Bearer <MCP_AUTH_TOKEN>` ヘッダーが必要になります。値は自分で生成してください(例: `openssl rand -hex 32`)。
+
+デプロイ後のWorker URLはデフォルトで公開されます。このサーバーは書き込み権限を持つAnnictトークンを保持しているため、`MCP_AUTH_TOKEN` が未設定のままだとURLを知った第三者があなたのAnnictアカウントに書き込めてしまいます。未設定の場合はリクエストを `500` で拒否します。
 
 ### 4. ローカル起動
 
@@ -42,20 +44,31 @@ MCP_AUTH_TOKEN=optional_shared_secret_for_bearer_auth
 npm run dev
 ```
 
-`http://localhost:8787/mcp` でMCPサーバー(Streamable HTTPトランスポート)が起動します。動作確認には [MCP Inspector](https://github.com/modelcontextprotocol/inspector) か、以下のようなcurlでのJSON-RPC呼び出しが利用できます。
+`http://localhost:8787/mcp` でMCPサーバー(Streamable HTTPトランスポート)が起動します。動作確認には [MCP Inspector](https://github.com/modelcontextprotocol/inspector) か、以下のcurlが利用できます。
+
+Streamable HTTPでは `initialize` 以外のリクエストに `Mcp-Session-Id` ヘッダーが必須なので、まず `initialize` でセッションIDを取得します。
 
 ```sh
+# 1. initialize してレスポンスヘッダー mcp-session-id を取得
+curl -i -X POST http://localhost:8787/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+
+# 2. 取得したセッションIDを付けて tools/list
 curl -X POST http://localhost:8787/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  -H "Mcp-Session-Id: <1で取得したID>" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
 ### 5. デプロイ
 
 ```sh
 npx wrangler secret put ANNICT_ACCESS_TOKEN --config packages/mcp-server/wrangler.jsonc
-# 必要であれば
 npx wrangler secret put MCP_AUTH_TOKEN --config packages/mcp-server/wrangler.jsonc
 
 npm run deploy
@@ -72,6 +85,8 @@ npm run deploy
 | `annict_get_episodes` | 作品の `annictId` からエピソード一覧を取得 |
 | `annict_record_episode` | エピソードを視聴済みとして記録(コメント任意) |
 | `annict_update_status` | 作品の視聴ステータスを更新 |
+
+一覧系の3ツール(`annict_get_library_entries` / `annict_search_works` / `annict_get_episodes`)はカーソルページネーションに対応しています。レスポンスの `pageInfo.hasNextPage` が `true` のとき、`pageInfo.endCursor` を次の呼び出しの `after` に渡すと続きを取得できます。`first` の既定値は25件です。
 
 `annict_record_episode` の `episodeId` と `annict_update_status` の `workId` は、AnnictのRelay形式のグローバルID(各オブジェクトの `id` フィールド)です。数値の `annictId` とは異なるので注意してください。`annict_get_episodes` や `annict_search_works` のレスポンスに含まれる `id` フィールドを利用します。
 

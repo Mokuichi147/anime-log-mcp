@@ -5,7 +5,7 @@ export const WORK_EPISODES_QUERY = /* GraphQL */ `
     searchWorks(annictIds: $annictIds, first: 1) {
       edges {
         node {
-          episodes(first: $first, after: $after) {
+          episodes(orderBy: { field: SORT_NUMBER, direction: ASC }, first: $first, after: $after) {
             edges {
               node {
                 id

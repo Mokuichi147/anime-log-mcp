@@ -1,18 +1,16 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import {
-  AnnictApiError,
-  AnnictClient,
-  AnnictGraphQLError,
-  type StatusState,
-} from "@annict-mcp/annict-client";
+import { AnnictClient, type StatusState } from "@annict-mcp/annict-client";
 
 export interface Env {
   ANNICT_ACCESS_TOKEN: string;
-  MCP_AUTH_TOKEN?: string;
+  MCP_AUTH_TOKEN: string;
   MCP_OBJECT: DurableObjectNamespace;
 }
+
+/** Applied when the caller omits `first`, rather than relying on Annict's default. */
+const DEFAULT_PAGE_SIZE = 25;
 
 const STATUS_STATES = [
   "NO_STATE",
@@ -33,12 +31,24 @@ function ok(data: unknown): ToolResult {
 }
 
 function errorResult(error: unknown): ToolResult {
-  const message =
-    error instanceof AnnictApiError || error instanceof AnnictGraphQLError || error instanceof Error
-      ? error.message
-      : String(error);
+  // AnnictApiError and AnnictGraphQLError both extend Error.
+  const message = error instanceof Error ? error.message : String(error);
   return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
 }
+
+const firstParam = (unit: string) =>
+  z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .describe(`Max number of ${unit} to return (default ${DEFAULT_PAGE_SIZE}).`);
+
+const afterParam = z
+  .string()
+  .optional()
+  .describe("Pagination cursor: pass pageInfo.endCursor from a previous response to fetch the next page.");
 
 export class AnnictMcpAgent extends McpAgent<Env> {
   server = new McpServer({ name: "annict-mcp", version: "0.1.0" });
@@ -61,11 +71,18 @@ export class AnnictMcpAgent extends McpAgent<Env> {
       "List the authenticated user's library entries (works they are tracking), optionally filtered by watch status.",
       {
         status: z.enum(STATUS_STATES).optional().describe("Filter by watch status (e.g. WATCHING, WANNA_WATCH)."),
-        first: z.number().int().min(1).max(50).optional().describe("Max number of entries to return (default 25)."),
+        first: firstParam("entries"),
+        after: afterParam,
       },
-      async ({ status, first }) => {
+      async ({ status, first, after }) => {
         try {
-          return ok(await this.client.getLibraryEntries({ states: status ? [status] : undefined, first }));
+          return ok(
+            await this.client.getLibraryEntries({
+              states: status ? [status] : undefined,
+              first: first ?? DEFAULT_PAGE_SIZE,
+              after,
+            }),
+          );
         } catch (error) {
           return errorResult(error);
         }
@@ -74,19 +91,25 @@ export class AnnictMcpAgent extends McpAgent<Env> {
 
     this.server.tool(
       "annict_search_works",
-      "Search Annict for anime works by title and/or season.",
+      "Search Annict for anime works by title and/or season. At least one of title or season is required.",
       {
-        title: z.string().optional().describe("Title (or part of it) to search for."),
-        season: z.string().optional().describe("Season string, e.g. '2018-autumn'."),
-        first: z.number().int().min(1).max(50).optional().describe("Max number of results to return (default 25)."),
+        title: z.string().min(1).optional().describe("Title (or part of it) to search for."),
+        season: z.string().min(1).optional().describe("Season string, e.g. '2018-autumn'."),
+        first: firstParam("results"),
+        after: afterParam,
       },
-      async ({ title, season, first }) => {
+      async ({ title, season, first, after }) => {
+        // Without a filter this would ask Annict for its entire catalogue.
+        if (!title && !season) {
+          return errorResult(new Error("Provide at least one of 'title' or 'season'."));
+        }
         try {
           return ok(
             await this.client.searchWorks({
               titles: title ? [title] : undefined,
               seasons: season ? [season] : undefined,
-              first,
+              first: first ?? DEFAULT_PAGE_SIZE,
+              after,
             }),
           );
         } catch (error) {
@@ -116,11 +139,14 @@ export class AnnictMcpAgent extends McpAgent<Env> {
       "List episodes for a work, given the work's numeric annictId.",
       {
         workAnnictId: z.number().int().describe("The work's numeric Annict ID."),
-        first: z.number().int().min(1).max(50).optional().describe("Max number of episodes to return (default 25)."),
+        first: firstParam("episodes"),
+        after: afterParam,
       },
-      async ({ workAnnictId, first }) => {
+      async ({ workAnnictId, first, after }) => {
         try {
-          return ok(await this.client.getEpisodes({ workAnnictId, first }));
+          return ok(
+            await this.client.getEpisodes({ workAnnictId, first: first ?? DEFAULT_PAGE_SIZE, after }),
+          );
         } catch (error) {
           return errorResult(error);
         }
@@ -161,19 +187,51 @@ export class AnnictMcpAgent extends McpAgent<Env> {
   }
 }
 
+const MCP_PATH = "/mcp";
+
+// Built once rather than per request. The agents package's default
+// Access-Control-Allow-Headers omits Authorization, so browser-based MCP
+// clients could not send the bearer token without this.
+const handler = AnnictMcpAgent.serve(MCP_PATH, {
+  corsOptions: {
+    headers: "Content-Type, mcp-session-id, mcp-protocol-version, Authorization",
+  },
+});
+
+function timingSafeEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const left = encoder.encode(a);
+  const right = encoder.encode(b);
+  if (left.length !== right.length) return false;
+  let diff = 0;
+  for (let i = 0; i < left.length; i++) diff |= left[i]! ^ right[i]!;
+  return diff === 0;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    if (env.MCP_AUTH_TOKEN) {
-      const auth = request.headers.get("authorization");
-      if (auth !== `Bearer ${env.MCP_AUTH_TOKEN}`) {
-        return new Response("Unauthorized", { status: 401 });
-      }
+    const url = new URL(request.url);
+    if (url.pathname !== MCP_PATH) {
+      return new Response("Not found", { status: 404 });
     }
 
-    const url = new URL(request.url);
-    if (url.pathname === "/mcp") {
-      return AnnictMcpAgent.serve("/mcp").fetch(request, env, ctx);
+    // Browsers never send Authorization on a CORS preflight, so the check below
+    // would reject it before the agents package could answer it.
+    if (request.method === "OPTIONS") {
+      return handler.fetch(request, env, ctx);
     }
-    return new Response("Not found", { status: 404 });
+
+    // This Worker holds a write-capable Annict token and its URL is public by
+    // default, so serving without the shared secret configured would expose the
+    // owner's account to anyone who finds the URL.
+    if (!env.MCP_AUTH_TOKEN) {
+      return new Response("Server misconfigured: MCP_AUTH_TOKEN is not set", { status: 500 });
+    }
+
+    if (!timingSafeEqual(request.headers.get("authorization") ?? "", `Bearer ${env.MCP_AUTH_TOKEN}`)) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    return handler.fetch(request, env, ctx);
   },
 };

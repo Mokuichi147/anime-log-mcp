@@ -1,2 +1,4 @@
 ANNICT_ACCESS_TOKEN=your_personal_access_token_here
-MCP_AUTH_TOKEN=optional_shared_secret_for_bearer_auth
+# Required. Sent by clients as `Authorization: Bearer <value>`.
+# Generate your own, e.g. `openssl rand -hex 32`. Never reuse this file's value.
+MCP_AUTH_TOKEN=
