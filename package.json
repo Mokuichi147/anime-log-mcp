@@ -1,0 +1,14 @@
+{
+  "name": "annict-mcp",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev": "npm run dev --workspace=@annict-mcp/mcp-server",
+    "deploy": "npm run deploy --workspace=@annict-mcp/mcp-server"
+  }
+}
