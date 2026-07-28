@@ -4,5 +4,5 @@
     "types": ["@cloudflare/workers-types"],
     "noEmit": true
   },
-  "include": ["src", "worker-configuration.d.ts"]
+  "include": ["src", "test", "vitest.config.ts", "worker-configuration.d.ts"]
 }

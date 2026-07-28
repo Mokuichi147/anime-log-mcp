@@ -4,19 +4,19 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-25",
   "compatibility_flags": ["nodejs_compat"],
-  "durable_objects": {
-    "bindings": [
-      { "name": "MCP_OBJECT", "class_name": "AnnictMcpAgent" }
-    ]
-  },
   // Stores OAuth grants, tokens and client registrations. Replace "id" with the
   // namespace created by `npx wrangler kv namespace create OAUTH_KV` before
   // deploying; `wrangler dev` simulates it locally regardless of the value.
   "kv_namespaces": [
     { "binding": "OAUTH_KV", "id": "replace-with-your-kv-namespace-id" }
   ],
+  // MCP is stateless as of protocol revision 2026-07-28, so the Durable Object
+  // that used to hold a session per client is gone. "v1" must stay listed for
+  // the v2 deletion to apply to deployments that already ran it; a first-time
+  // deployment applies both tags in order and ends up with no Durable Object.
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["AnnictMcpAgent"] }
+    { "tag": "v1", "new_sqlite_classes": ["AnnictMcpAgent"] },
+    { "tag": "v2", "deleted_classes": ["AnnictMcpAgent"] }
   ],
   "observability": {
     "enabled": true

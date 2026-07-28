@@ -5,7 +5,9 @@
 npmで公開されている `annict` パッケージはREST API v1をラップしたものでアーカイブ済みのため使用していません。本プロジェクトは以下の2つのパッケージで構成されます。
 
 - `packages/annict-client` — Annict公式GraphQL API (`https://api.annict.com/graphql`) を直接操作する、Cloudflare Workersにも依存しない薄いTypeScriptクライアント
-- `packages/mcp-server` — `annict-client` を使ってツールを公開する、Cloudflare Workers上のMCPサーバー([`agents`](https://www.npmjs.com/package/agents)パッケージの`McpAgent`を利用)
+- `packages/mcp-server` — `annict-client` を使ってツールを公開する、Cloudflare Workers上のMCPサーバー([`@modelcontextprotocol/server`](https://www.npmjs.com/package/@modelcontextprotocol/server) v2 の `createMcpHandler` を利用)
+
+プロトコルリビジョン **2026-07-28** に対応しています(下記「ステートレス化」を参照)。
 
 ## セットアップ
 
@@ -101,6 +103,25 @@ Annictトークンはgrantに紐付いた `props` として保存され、[`@clo
 
 Annictに要求するスコープは `read write` です(視聴記録の作成・ステータス更新のため)。
 
+## ステートレス化 (MCP 2026-07-28)
+
+[2026-07-28リビジョン](https://modelcontextprotocol.io/specification/2026-07-28/changelog)でMCPはステートレスになりました。`initialize` / `notifications/initialized` のハンドシェイクとStreamable HTTPの `Mcp-Session-Id` ヘッダーが廃止され、各リクエストが `_meta` にプロトコルバージョンとクライアント能力を載せて自己完結します。サーバー側の能力表明は新設の `server/discover` が担います。
+
+この変更に合わせ、本サーバーはセッションを保持しない構成になりました。
+
+- **Durable Objectを廃止** — 以前はクライアントごとのセッションを`McpAgent`(Durable Object)が保持していました。セッションが無くなったため、`MCP_OBJECT` バインディングごと削除しています。どのWorkerアイソレートも任意のリクエストに応答できます
+- **リクエストごとにサーバーインスタンスを生成** — `createMcpHandler` のファクトリが、そのリクエストが認証したAnnictトークンから `McpServer` を組み立てます。レスポンス後には何も残りません
+- **唯一の永続状態はOAuth grant** — 利用者のAnnictトークンは従来どおりKVのgrantに暗号化保存され、リクエストごとに `ctx.props` として渡されます。これはMCPのセッションではなく認可状態です
+
+`legacy: 'stateless'` (既定値) を指定しているため、2025リビジョンまでのクライアントも同じツール定義でそのまま接続できます。こちらもリクエストごとの処理で、セッションは作られません(GET/DELETEには405を返します)。
+
+> [!NOTE]
+> 2026-07-28では `ping` / `logging/setLevel` / SSEの再開(`Last-Event-ID`)なども廃止され、Roots・Sampling・Loggingが非推奨になりました。本サーバーはツールのみを公開しており、いずれも利用していません。
+
+### アップグレード時の注意
+
+既に旧バージョンをデプロイしている場合、Durable Objectクラスの削除を反映するマイグレーションが必要です。`wrangler.jsonc` に `v2` (`deleted_classes`) を追加済みなので、`npm run deploy` を実行すれば適用されます。`v1` の記述は削除しないでください(適用済みデプロイに対して `v2` を正しく適用するために必要です)。
+
 ## 提供ツール
 
 | ツール名 | 説明 |
@@ -123,7 +144,10 @@ Annictに要求するスコープは `read write` です(視聴記録の作成�
 npm test
 ```
 
-`annict-client` パッケージのvitestテストが実行されます(`fetch` をモックしたユニットテスト)。`mcp-server` パッケージには自動テストはなく、`npm run dev` + curl/MCP Inspectorでの手動確認を想定しています。
+両パッケージのvitestテストが実行されます。
+
+- `annict-client` — `fetch` をモックしたユニットテスト
+- `mcp-server` — `@modelcontextprotocol/client` v2 を `2026-07-28` にピン留めして、HTTPハンドラーをプロセス内で叩く結合テスト。ハンドシェイク無しの `tools/list`、`Mcp-Session-Id` が返らないこと、リクエスト間で状態が共有されないことを確認しています
 
 ## 型チェック
 

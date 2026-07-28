@@ -232,6 +232,10 @@ async function handleCallback(request: Request, env: Env, url: URL): Promise<Res
   const props: Props = {
     annictAccessToken: token.access_token,
     annictUsername: viewer.username,
+    // Recorded here because the stateless MCP handler has no session to look
+    // the caller up in; it rebuilds AuthInfo from these on every request.
+    clientId: authRequest.clientId,
+    scope: authRequest.scope.join(" "),
   };
 
   const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
