@@ -1,5 +1,5 @@
 # Credentials of the Annict OAuth application registered for this deployment.
 # Create one at https://annict.com/oauth/applications with the redirect URI
-# http://localhost:8787/callback (and your Worker URL + /callback for production).
+# http://localhost:8000/callback (and your Worker URL + /callback for production).
 ANNICT_CLIENT_ID=
 ANNICT_CLIENT_SECRET=
