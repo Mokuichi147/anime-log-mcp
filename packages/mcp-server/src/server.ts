@@ -60,7 +60,7 @@ export function createAnnictMcpServer(annictAccessToken: string): McpServer {
   const client = new AnnictClient({ accessToken: annictAccessToken });
 
   const server = new McpServer(
-    { name: "annict-mcp", version: "0.1.0" },
+    { name: "unofficial-annict-mcp-server", version: "0.1.0" },
     {
       capabilities: { tools: {} },
       cacheHints: {

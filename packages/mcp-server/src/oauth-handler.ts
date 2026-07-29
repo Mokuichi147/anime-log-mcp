@@ -73,7 +73,7 @@ function htmlResponse(body: string, extraHeaders: Record<string, string> = {}): 
 
 function errorPage(message: string, status: number): Response {
   return new Response(
-    `<!doctype html><meta charset="utf-8"><title>annict-mcp</title><h1>認可できませんでした</h1><p>${escapeHtml(message)}</p>`,
+    `<!doctype html><meta charset="utf-8"><title>unofficial-annict-mcp-server</title><h1>認可できませんでした</h1><p>${escapeHtml(message)}</p>`,
     { status, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
 }
@@ -84,7 +84,7 @@ function renderConsent(client: ClientInfo, csrf: string): string {
   return `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>annict-mcp へのアクセス許可</title>
+<title>unofficial-annict-mcp-server へのアクセス許可</title>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 34rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.7; }
   dl { background: #f6f6f7; border-radius: 8px; padding: 1rem 1.25rem; }
@@ -94,6 +94,7 @@ function renderConsent(client: ClientInfo, csrf: string): string {
   button { font-size: 1rem; padding: .6rem 1.4rem; border-radius: 6px; border: 0; cursor: pointer; }
   .approve { background: #1a7f37; color: #fff; }
   .deny { background: #eee; }
+  .notice { background: #fff8e5; border-left: 4px solid #d29922; border-radius: 4px; padding: .75rem 1rem; }
 </style>
 <h1>アクセスを許可しますか？</h1>
 <p><strong>${name}</strong> があなたのAnnictアカウントへのアクセスを求めています。</p>
@@ -102,6 +103,8 @@ function renderConsent(client: ClientInfo, csrf: string): string {
   <dt>リダイレクト先</dt><dd>${redirect}</dd>
   <dt>Annictに要求する権限</dt><dd>読み取り + 書き込み（視聴記録の作成・ステータス更新を含む）</dd>
 </dl>
+<p class="notice"><strong>これはAnnict非公式のサーバーです。</strong>Annictの運営とは関係ありません。
+許可すると、あなたのAnnictアクセストークンがこのサーバーに保存され、<strong>このサーバーを運用している人が、あなたのAnnictアカウントとして操作できる状態になります</strong>（視聴記録の作成やステータスの変更を含む）。運用者を信頼できる場合のみ許可してください。</p>
 <p>許可すると、続けてAnnictのログイン画面に進みます。</p>
 <form method="post">
   <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
@@ -267,9 +270,9 @@ export const annictOAuthHandler = {
 
     if (url.pathname === "/") {
       return htmlResponse(
-        `<!doctype html><meta charset="utf-8"><title>annict-mcp</title>
-<h1>annict-mcp</h1>
-<p>AnnictのMCPサーバーです。MCPクライアントに次のURLを登録してください。</p>
+        `<!doctype html><meta charset="utf-8"><title>unofficial-annict-mcp-server</title>
+<h1>unofficial-annict-mcp-server</h1>
+<p>Annictの公式GraphQL APIを利用した、非公式のMCPサーバーです。Annictの運営とは関係ありません。MCPクライアントに次のURLを登録してください。</p>
 <pre>${escapeHtml(url.origin)}/mcp</pre>`,
       );
     }
