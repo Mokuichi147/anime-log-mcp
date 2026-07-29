@@ -126,7 +126,9 @@ describe("stateless MCP handler", () => {
       // Required on list results by the CacheableResult interface.
       ttlMs: expect.any(Number),
       cacheScope: "private",
-      _meta: { "io.modelcontextprotocol/serverInfo": { name: "annict-mcp" } },
+      _meta: {
+        "io.modelcontextprotocol/serverInfo": { name: "unofficial-annict-mcp-server" },
+      },
     });
     expect(body.result.tools).toHaveLength(7);
   });

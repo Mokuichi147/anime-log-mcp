@@ -4,11 +4,17 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-25",
   "compatibility_flags": ["nodejs_compat"],
+  // The Annict OAuth application registers http://localhost:8000/callback as a
+  // redirect URI, and the callback URL is derived from the request origin, so
+  // `wrangler dev` must listen on 8000 rather than its default 8787.
+  "dev": {
+    "port": 8000
+  },
   // Stores OAuth grants, tokens and client registrations. Replace "id" with the
   // namespace created by `npx wrangler kv namespace create OAUTH_KV` before
   // deploying; `wrangler dev` simulates it locally regardless of the value.
   "kv_namespaces": [
-    { "binding": "OAUTH_KV", "id": "replace-with-your-kv-namespace-id" }
+    { "binding": "OAUTH_KV", "id": "a17b58b871f94f20ae5bf0e475102bc1" }
   ],
   // MCP is stateless as of protocol revision 2026-07-28, so the Durable Object
   // that used to hold a session per client is gone. "v1" must stay listed for

@@ -21,7 +21,7 @@ npm install
 
 1. https://annict.com/oauth/applications を開き、アプリケーションを新規作成する
 2. **Redirect URI** に `https://<your-worker>.workers.dev/callback` を設定する
-   - ローカル開発でも試す場合は `http://localhost:8787/callback` も追加する
+   - ローカル開発でも試す場合は `http://localhost:8000/callback` も追加する
 3. 発行された **Client ID** と **Client Secret** を控える
 
 このアプリケーションはデプロイ全体で1つだけ登録します。利用者ごとに登録する必要はありません。
@@ -56,7 +56,7 @@ ANNICT_CLIENT_SECRET=your_client_secret
 ### 5. 起動とデプロイ
 
 ```sh
-npm run dev     # http://localhost:8787
+npm run dev     # http://localhost:8000
 npm run deploy
 ```
 

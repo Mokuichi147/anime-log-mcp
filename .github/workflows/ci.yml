@@ -1,9 +1,12 @@
 name: CI
 
+# main への push では Cloudflare Workers Builds が同じ typecheck / test を
+# 実行してからデプロイするため、ここではマージ前のPRだけを検査する。
 on:
-  push:
-    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   check:
