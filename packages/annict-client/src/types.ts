@@ -24,7 +24,7 @@ export interface RawConnection<T> {
   pageInfo: PageInfo;
 }
 
-export interface Viewer {
+export interface User {
   id: string;
   annictId: number;
   username: string;
@@ -37,6 +37,9 @@ export interface Viewer {
   stopWatchingCount: number;
   recordsCount: number;
 }
+
+/** The authenticated user. Same `User` shape, kept as its own name at call sites. */
+export type Viewer = User;
 
 export interface Work {
   id: string;
@@ -94,4 +97,47 @@ export interface AnnictRecord {
   createdAt: string;
   episode: EpisodeSummary;
   work: WorkSummary;
+}
+
+export interface SeriesSummary {
+  id: string;
+  annictId: number;
+  name: string;
+}
+
+/** Annict declares every string field here as non-null; unset ones come back as `""`. */
+export interface Character {
+  id: string;
+  annictId: number;
+  name: string;
+  nameEn: string;
+  nameKana: string;
+  nickname: string;
+  description: string;
+  /** The series the character belongs to. Null for characters not tied to one. */
+  series: SeriesSummary | null;
+}
+
+export interface Person {
+  id: string;
+  annictId: number;
+  name: string;
+  nameEn: string;
+  nameKana: string;
+  nickname: string | null;
+  birthday: string | null;
+  bloodType: string | null;
+  genderText: string | null;
+  url: string | null;
+  wikipediaUrl: string | null;
+}
+
+export interface Organization {
+  id: string;
+  annictId: number;
+  name: string;
+  nameEn: string;
+  nameKana: string;
+  url: string | null;
+  wikipediaUrl: string | null;
 }

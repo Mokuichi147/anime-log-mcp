@@ -43,6 +43,15 @@ const afterParam = z
   .optional()
   .describe("Pagination cursor: pass pageInfo.endCursor from a previous response to fetch the next page.");
 
+/** Annict matches this as a substring, against both the name and its kana reading. */
+const nameParam = z.string().min(1).optional().describe("Name (or part of it) to search for.");
+
+const annictIdParam = z
+  .number()
+  .int()
+  .optional()
+  .describe("Numeric Annict ID. Narrows the result further when combined with name.");
+
 /**
  * The tool list is identical for every caller, so it is safe for a client to
  * cache — but it is served behind a per-user token, so only that client may
@@ -76,6 +85,24 @@ export function createAnnictMcpServer(annictAccessToken: string): McpServer {
     async () => {
       try {
         return ok(await client.getViewer());
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "annict_get_user",
+    {
+      description: "Get another Annict user's public profile and watch-status counts by username.",
+      inputSchema: z.object({
+        username: z.string().min(1).describe("The user's Annict username, as it appears in their profile URL."),
+      }),
+    },
+    async ({ username }) => {
+      try {
+        const user = await client.getUser(username);
+        return ok(user ?? { found: false });
       } catch (error) {
         return errorResult(error);
       }
@@ -129,6 +156,105 @@ export function createAnnictMcpServer(annictAccessToken: string): McpServer {
           await client.searchWorks({
             titles: title ? [title] : undefined,
             seasons: season ? [season] : undefined,
+            first: first ?? DEFAULT_PAGE_SIZE,
+            after,
+          }),
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "annict_search_characters",
+    {
+      description:
+        "Search Annict for anime characters by name. At least one of name or annictId is required. " +
+        "Each result carries the series it belongs to, when Annict has one on record.",
+      inputSchema: z.object({
+        name: nameParam,
+        annictId: annictIdParam,
+        first: firstParam("results"),
+        after: afterParam,
+      }),
+    },
+    async ({ name, annictId, first, after }) => {
+      // Without a filter this would ask Annict for every character it knows.
+      if (!name && annictId === undefined) {
+        return errorResult(new Error("Provide at least one of 'name' or 'annictId'."));
+      }
+      try {
+        return ok(
+          await client.searchCharacters({
+            names: name ? [name] : undefined,
+            annictIds: annictId === undefined ? undefined : [annictId],
+            first: first ?? DEFAULT_PAGE_SIZE,
+            after,
+          }),
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "annict_search_people",
+    {
+      description:
+        "Search Annict for people (voice actors, directors, staff) by name. " +
+        "At least one of name or annictId is required.",
+      inputSchema: z.object({
+        name: nameParam,
+        annictId: annictIdParam,
+        first: firstParam("results"),
+        after: afterParam,
+      }),
+    },
+    async ({ name, annictId, first, after }) => {
+      // Without a filter this would ask Annict for every person it knows.
+      if (!name && annictId === undefined) {
+        return errorResult(new Error("Provide at least one of 'name' or 'annictId'."));
+      }
+      try {
+        return ok(
+          await client.searchPeople({
+            names: name ? [name] : undefined,
+            annictIds: annictId === undefined ? undefined : [annictId],
+            first: first ?? DEFAULT_PAGE_SIZE,
+            after,
+          }),
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "annict_search_organizations",
+    {
+      description:
+        "Search Annict for organizations (studios, production companies) by name. " +
+        "At least one of name or annictId is required.",
+      inputSchema: z.object({
+        name: nameParam,
+        annictId: annictIdParam,
+        first: firstParam("results"),
+        after: afterParam,
+      }),
+    },
+    async ({ name, annictId, first, after }) => {
+      // Without a filter this would ask Annict for every organization it knows.
+      if (!name && annictId === undefined) {
+        return errorResult(new Error("Provide at least one of 'name' or 'annictId'."));
+      }
+      try {
+        return ok(
+          await client.searchOrganizations({
+            names: name ? [name] : undefined,
+            annictIds: annictId === undefined ? undefined : [annictId],
             first: first ?? DEFAULT_PAGE_SIZE,
             after,
           }),
