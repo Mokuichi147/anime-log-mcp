@@ -43,9 +43,14 @@ const afterParam = z
   .optional()
   .describe("Pagination cursor: pass pageInfo.endCursor from a previous response to fetch the next page.");
 
-const namesParam = z.array(z.string().min(1)).min(1).optional().describe("Names (or parts of them) to search for.");
+/** Annict matches this as a substring, against both the name and its kana reading. */
+const nameParam = z.string().min(1).optional().describe("Name (or part of it) to search for.");
 
-const annictIdsParam = z.array(z.number().int()).min(1).optional().describe("Filter by numeric Annict IDs.");
+const annictIdParam = z
+  .number()
+  .int()
+  .optional()
+  .describe("Numeric Annict ID. Narrows the result further when combined with name.");
 
 /**
  * The tool list is identical for every caller, so it is safe for a client to
@@ -164,20 +169,30 @@ export function createAnnictMcpServer(annictAccessToken: string): McpServer {
   server.registerTool(
     "annict_search_characters",
     {
-      description: "Search Annict for anime characters by name. At least one of names or annictIds is required.",
+      description:
+        "Search Annict for anime characters by name. At least one of name or annictId is required. " +
+        "Each result carries the series it belongs to, when Annict has one on record.",
       inputSchema: z.object({
-        names: namesParam,
-        annictIds: annictIdsParam,
+        name: nameParam,
+        annictId: annictIdParam,
         first: firstParam("results"),
         after: afterParam,
       }),
     },
-    async ({ names, annictIds, first, after }) => {
-      if (!names && !annictIds) {
-        return errorResult(new Error("Provide at least one of 'names' or 'annictIds'."));
+    async ({ name, annictId, first, after }) => {
+      // Without a filter this would ask Annict for every character it knows.
+      if (!name && annictId === undefined) {
+        return errorResult(new Error("Provide at least one of 'name' or 'annictId'."));
       }
       try {
-        return ok(await client.searchCharacters({ names, annictIds, first: first ?? DEFAULT_PAGE_SIZE, after }));
+        return ok(
+          await client.searchCharacters({
+            names: name ? [name] : undefined,
+            annictIds: annictId === undefined ? undefined : [annictId],
+            first: first ?? DEFAULT_PAGE_SIZE,
+            after,
+          }),
+        );
       } catch (error) {
         return errorResult(error);
       }
@@ -188,20 +203,29 @@ export function createAnnictMcpServer(annictAccessToken: string): McpServer {
     "annict_search_people",
     {
       description:
-        "Search Annict for people (voice actors, directors, staff) by name. At least one of names or annictIds is required.",
+        "Search Annict for people (voice actors, directors, staff) by name. " +
+        "At least one of name or annictId is required.",
       inputSchema: z.object({
-        names: namesParam,
-        annictIds: annictIdsParam,
+        name: nameParam,
+        annictId: annictIdParam,
         first: firstParam("results"),
         after: afterParam,
       }),
     },
-    async ({ names, annictIds, first, after }) => {
-      if (!names && !annictIds) {
-        return errorResult(new Error("Provide at least one of 'names' or 'annictIds'."));
+    async ({ name, annictId, first, after }) => {
+      // Without a filter this would ask Annict for every person it knows.
+      if (!name && annictId === undefined) {
+        return errorResult(new Error("Provide at least one of 'name' or 'annictId'."));
       }
       try {
-        return ok(await client.searchPeople({ names, annictIds, first: first ?? DEFAULT_PAGE_SIZE, after }));
+        return ok(
+          await client.searchPeople({
+            names: name ? [name] : undefined,
+            annictIds: annictId === undefined ? undefined : [annictId],
+            first: first ?? DEFAULT_PAGE_SIZE,
+            after,
+          }),
+        );
       } catch (error) {
         return errorResult(error);
       }
@@ -212,20 +236,29 @@ export function createAnnictMcpServer(annictAccessToken: string): McpServer {
     "annict_search_organizations",
     {
       description:
-        "Search Annict for organizations (studios, production companies) by name. At least one of names or annictIds is required.",
+        "Search Annict for organizations (studios, production companies) by name. " +
+        "At least one of name or annictId is required.",
       inputSchema: z.object({
-        names: namesParam,
-        annictIds: annictIdsParam,
+        name: nameParam,
+        annictId: annictIdParam,
         first: firstParam("results"),
         after: afterParam,
       }),
     },
-    async ({ names, annictIds, first, after }) => {
-      if (!names && !annictIds) {
-        return errorResult(new Error("Provide at least one of 'names' or 'annictIds'."));
+    async ({ name, annictId, first, after }) => {
+      // Without a filter this would ask Annict for every organization it knows.
+      if (!name && annictId === undefined) {
+        return errorResult(new Error("Provide at least one of 'name' or 'annictId'."));
       }
       try {
-        return ok(await client.searchOrganizations({ names, annictIds, first: first ?? DEFAULT_PAGE_SIZE, after }));
+        return ok(
+          await client.searchOrganizations({
+            names: name ? [name] : undefined,
+            annictIds: annictId === undefined ? undefined : [annictId],
+            first: first ?? DEFAULT_PAGE_SIZE,
+            after,
+          }),
+        );
       } catch (error) {
         return errorResult(error);
       }

@@ -165,6 +165,40 @@ describe("stateless MCP handler", () => {
     expect(annictFetch).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects a search that would have no filter at all", async () => {
+    const client = await connectClient();
+    const result = await client.callTool({ name: "annict_search_characters", arguments: {} });
+    await client.close();
+
+    expect(result.isError).toBe(true);
+    expect((result.content as Array<{ text: string }>)[0]!.text).toContain("'name' or 'annictId'");
+    // Nothing should have reached Annict.
+    expect(annictFetch).not.toHaveBeenCalled();
+  });
+
+  it("passes the singular search arguments through as Annict's list variables", async () => {
+    annictFetch.mockResolvedValueOnce(
+      graphqlResponse({
+        searchCharacters: {
+          edges: [],
+          pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null },
+        },
+      }),
+    );
+
+    const client = await connectClient();
+    const result = await client.callTool({
+      name: "annict_search_characters",
+      arguments: { name: "レム", annictId: 42 },
+    });
+    await client.close();
+
+    expect(result.isError).toBeFalsy();
+    const [, init] = annictFetch.mock.calls[0]!;
+    const body = JSON.parse((init as RequestInit).body as string) as { variables: Record<string, unknown> };
+    expect(body.variables).toMatchObject({ names: ["レム"], annictIds: [42], first: 25 });
+  });
+
   it("reports the tool call as an error when Annict rejects the token", async () => {
     annictFetch.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
 

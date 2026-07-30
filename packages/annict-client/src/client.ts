@@ -19,6 +19,7 @@ import type {
   Person,
   RawConnection,
   StatusState,
+  User,
   Viewer,
   Work,
 } from "./types.js";
@@ -94,7 +95,7 @@ export class AnnictClient {
     return toConnection(data.searchWorks);
   }
 
-  async getUser(username: string): Promise<Viewer | null> {
+  async getUser(username: string): Promise<User | null> {
     const data = await this.request<UserQueryData>(USER_QUERY, { username });
     return data.user;
   }

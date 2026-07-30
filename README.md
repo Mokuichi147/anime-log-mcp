@@ -132,9 +132,9 @@ Annictに要求するスコープは `read write` です(視聴記録の作成�
 | `annict_search_works` | タイトル・シーズンで作品を検索 |
 | `annict_get_work` | 数値の `annictId` で作品を1件取得 |
 | `annict_get_episodes` | 作品の `annictId` からエピソード一覧を取得 |
-| `annict_search_characters` | 名前でアニメのキャラクターを検索 |
-| `annict_search_people` | 名前で声優・監督などの人物を検索 |
-| `annict_search_organizations` | 名前で制作会社・スタジオを検索 |
+| `annict_search_characters` | 名前(または `annictId`)でアニメのキャラクターを検索。所属シリーズも一緒に返します |
+| `annict_search_people` | 名前(または `annictId`)で声優・監督などの人物を検索 |
+| `annict_search_organizations` | 名前(または `annictId`)で制作会社・スタジオを検索 |
 | `annict_record_episode` | エピソードを視聴済みとして記録(コメント任意) |
 | `annict_update_status` | 作品の視聴ステータスを更新 |
 

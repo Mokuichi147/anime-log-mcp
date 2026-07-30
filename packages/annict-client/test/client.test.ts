@@ -71,7 +71,7 @@ describe("AnnictClient", () => {
       jsonResponse({
         data: {
           searchCharacters: {
-            edges: [{ node: { id: "c1", name: "Character A" } }],
+            edges: [{ node: { id: "c1", name: "Character A", series: { id: "s1", annictId: 9, name: "Series A" } } }],
             pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null },
           },
         },
@@ -81,7 +81,9 @@ describe("AnnictClient", () => {
 
     const result = await client.searchCharacters({ names: ["Character A"] });
 
-    expect(result.nodes).toEqual([{ id: "c1", name: "Character A" }]);
+    expect(result.nodes).toEqual([
+      { id: "c1", name: "Character A", series: { id: "s1", annictId: 9, name: "Series A" } },
+    ]);
   });
 
   it("searchPeople flattens edges into nodes", async () => {

@@ -12,6 +12,11 @@ export const SEARCH_CHARACTERS_QUERY = /* GraphQL */ `
           nameKana
           nickname
           description
+          series {
+            id
+            annictId
+            name
+          }
         }
       }
       pageInfo {

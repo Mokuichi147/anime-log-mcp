@@ -1,4 +1,4 @@
-import type { Viewer } from "../types.js";
+import type { User } from "../types.js";
 
 export const USER_QUERY = /* GraphQL */ `
   query GetUser($username: String!) {
@@ -19,5 +19,5 @@ export const USER_QUERY = /* GraphQL */ `
 `;
 
 export interface UserQueryData {
-  user: Viewer | null;
+  user: User | null;
 }
