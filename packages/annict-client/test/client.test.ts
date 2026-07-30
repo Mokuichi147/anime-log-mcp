@@ -50,6 +50,76 @@ describe("AnnictClient", () => {
     expect(result.pageInfo.hasNextPage).toBe(false);
   });
 
+  it("getUser returns the user", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ data: { user: { id: "u2", name: "hanako" } } }));
+    const client = clientWithFetch(fetchImpl);
+
+    const user = await client.getUser("hanako");
+
+    expect(user).toEqual({ id: "u2", name: "hanako" });
+  });
+
+  it("getUser returns null when the username does not exist", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ data: { user: null } }));
+    const client = clientWithFetch(fetchImpl);
+
+    await expect(client.getUser("nobody")).resolves.toBeNull();
+  });
+
+  it("searchCharacters flattens edges into nodes", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          searchCharacters: {
+            edges: [{ node: { id: "c1", name: "Character A" } }],
+            pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null },
+          },
+        },
+      }),
+    );
+    const client = clientWithFetch(fetchImpl);
+
+    const result = await client.searchCharacters({ names: ["Character A"] });
+
+    expect(result.nodes).toEqual([{ id: "c1", name: "Character A" }]);
+  });
+
+  it("searchPeople flattens edges into nodes", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          searchPeople: {
+            edges: [{ node: { id: "p1", name: "Person A" } }],
+            pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null },
+          },
+        },
+      }),
+    );
+    const client = clientWithFetch(fetchImpl);
+
+    const result = await client.searchPeople({ names: ["Person A"] });
+
+    expect(result.nodes).toEqual([{ id: "p1", name: "Person A" }]);
+  });
+
+  it("searchOrganizations flattens edges into nodes", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          searchOrganizations: {
+            edges: [{ node: { id: "o1", name: "Studio A" } }],
+            pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null },
+          },
+        },
+      }),
+    );
+    const client = clientWithFetch(fetchImpl);
+
+    const result = await client.searchOrganizations({ names: ["Studio A"] });
+
+    expect(result.nodes).toEqual([{ id: "o1", name: "Studio A" }]);
+  });
+
   it("getWork returns null when searchWorks finds nothing", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       jsonResponse({

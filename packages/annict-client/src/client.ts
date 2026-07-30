@@ -1,15 +1,22 @@
 import { execute } from "./executor.js";
+import { SEARCH_CHARACTERS_QUERY, type SearchCharactersQueryData } from "./queries/characters.js";
 import { CREATE_RECORD_MUTATION, type CreateRecordMutationData } from "./queries/create-record.js";
 import { WORK_EPISODES_QUERY, type WorkEpisodesQueryData } from "./queries/episodes.js";
 import { LIBRARY_ENTRIES_QUERY, type LibraryEntriesQueryData } from "./queries/library-entries.js";
+import { SEARCH_ORGANIZATIONS_QUERY, type SearchOrganizationsQueryData } from "./queries/organizations.js";
+import { SEARCH_PEOPLE_QUERY, type SearchPeopleQueryData } from "./queries/people.js";
 import { UPDATE_STATUS_MUTATION, type UpdateStatusMutationData } from "./queries/update-status.js";
+import { USER_QUERY, type UserQueryData } from "./queries/user.js";
 import { VIEWER_QUERY, type ViewerQueryData } from "./queries/viewer.js";
 import { SEARCH_WORKS_QUERY, type SearchWorksQueryData } from "./queries/works.js";
 import type {
   AnnictRecord,
+  Character,
   Connection,
   Episode,
   LibraryEntry,
+  Organization,
+  Person,
   RawConnection,
   StatusState,
   Viewer,
@@ -85,6 +92,56 @@ export class AnnictClient {
       after: params.after,
     });
     return toConnection(data.searchWorks);
+  }
+
+  async getUser(username: string): Promise<Viewer | null> {
+    const data = await this.request<UserQueryData>(USER_QUERY, { username });
+    return data.user;
+  }
+
+  async searchCharacters(params: {
+    names?: string[];
+    annictIds?: number[];
+    first?: number;
+    after?: string;
+  }): Promise<Connection<Character>> {
+    const data = await this.request<SearchCharactersQueryData>(SEARCH_CHARACTERS_QUERY, {
+      names: params.names,
+      annictIds: params.annictIds,
+      first: params.first,
+      after: params.after,
+    });
+    return toConnection(data.searchCharacters);
+  }
+
+  async searchPeople(params: {
+    names?: string[];
+    annictIds?: number[];
+    first?: number;
+    after?: string;
+  }): Promise<Connection<Person>> {
+    const data = await this.request<SearchPeopleQueryData>(SEARCH_PEOPLE_QUERY, {
+      names: params.names,
+      annictIds: params.annictIds,
+      first: params.first,
+      after: params.after,
+    });
+    return toConnection(data.searchPeople);
+  }
+
+  async searchOrganizations(params: {
+    names?: string[];
+    annictIds?: number[];
+    first?: number;
+    after?: string;
+  }): Promise<Connection<Organization>> {
+    const data = await this.request<SearchOrganizationsQueryData>(SEARCH_ORGANIZATIONS_QUERY, {
+      names: params.names,
+      annictIds: params.annictIds,
+      first: params.first,
+      after: params.after,
+    });
+    return toConnection(data.searchOrganizations);
   }
 
   async getWork(annictId: number): Promise<Work | null> {

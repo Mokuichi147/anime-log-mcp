@@ -82,9 +82,13 @@ describe("stateless MCP handler", () => {
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       "annict_get_episodes",
       "annict_get_library_entries",
+      "annict_get_user",
       "annict_get_viewer",
       "annict_get_work",
       "annict_record_episode",
+      "annict_search_characters",
+      "annict_search_organizations",
+      "annict_search_people",
       "annict_search_works",
       "annict_update_status",
     ]);
@@ -130,7 +134,7 @@ describe("stateless MCP handler", () => {
         "io.modelcontextprotocol/serverInfo": { name: "unofficial-annict-mcp-server" },
       },
     });
-    expect(body.result.tools).toHaveLength(7);
+    expect(body.result.tools).toHaveLength(11);
   });
 
   it("calls a tool with the Annict token taken from the request's grant", async () => {

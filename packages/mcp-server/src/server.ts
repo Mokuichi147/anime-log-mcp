@@ -43,6 +43,10 @@ const afterParam = z
   .optional()
   .describe("Pagination cursor: pass pageInfo.endCursor from a previous response to fetch the next page.");
 
+const namesParam = z.array(z.string().min(1)).min(1).optional().describe("Names (or parts of them) to search for.");
+
+const annictIdsParam = z.array(z.number().int()).min(1).optional().describe("Filter by numeric Annict IDs.");
+
 /**
  * The tool list is identical for every caller, so it is safe for a client to
  * cache — but it is served behind a per-user token, so only that client may
@@ -76,6 +80,24 @@ export function createAnnictMcpServer(annictAccessToken: string): McpServer {
     async () => {
       try {
         return ok(await client.getViewer());
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "annict_get_user",
+    {
+      description: "Get another Annict user's public profile and watch-status counts by username.",
+      inputSchema: z.object({
+        username: z.string().min(1).describe("The user's Annict username, as it appears in their profile URL."),
+      }),
+    },
+    async ({ username }) => {
+      try {
+        const user = await client.getUser(username);
+        return ok(user ?? { found: false });
       } catch (error) {
         return errorResult(error);
       }
@@ -133,6 +155,77 @@ export function createAnnictMcpServer(annictAccessToken: string): McpServer {
             after,
           }),
         );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "annict_search_characters",
+    {
+      description: "Search Annict for anime characters by name. At least one of names or annictIds is required.",
+      inputSchema: z.object({
+        names: namesParam,
+        annictIds: annictIdsParam,
+        first: firstParam("results"),
+        after: afterParam,
+      }),
+    },
+    async ({ names, annictIds, first, after }) => {
+      if (!names && !annictIds) {
+        return errorResult(new Error("Provide at least one of 'names' or 'annictIds'."));
+      }
+      try {
+        return ok(await client.searchCharacters({ names, annictIds, first: first ?? DEFAULT_PAGE_SIZE, after }));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "annict_search_people",
+    {
+      description:
+        "Search Annict for people (voice actors, directors, staff) by name. At least one of names or annictIds is required.",
+      inputSchema: z.object({
+        names: namesParam,
+        annictIds: annictIdsParam,
+        first: firstParam("results"),
+        after: afterParam,
+      }),
+    },
+    async ({ names, annictIds, first, after }) => {
+      if (!names && !annictIds) {
+        return errorResult(new Error("Provide at least one of 'names' or 'annictIds'."));
+      }
+      try {
+        return ok(await client.searchPeople({ names, annictIds, first: first ?? DEFAULT_PAGE_SIZE, after }));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "annict_search_organizations",
+    {
+      description:
+        "Search Annict for organizations (studios, production companies) by name. At least one of names or annictIds is required.",
+      inputSchema: z.object({
+        names: namesParam,
+        annictIds: annictIdsParam,
+        first: firstParam("results"),
+        after: afterParam,
+      }),
+    },
+    async ({ names, annictIds, first, after }) => {
+      if (!names && !annictIds) {
+        return errorResult(new Error("Provide at least one of 'names' or 'annictIds'."));
+      }
+      try {
+        return ok(await client.searchOrganizations({ names, annictIds, first: first ?? DEFAULT_PAGE_SIZE, after }));
       } catch (error) {
         return errorResult(error);
       }

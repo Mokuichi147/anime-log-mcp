@@ -95,3 +95,37 @@ export interface AnnictRecord {
   episode: EpisodeSummary;
   work: WorkSummary;
 }
+
+export interface Character {
+  id: string;
+  annictId: number;
+  name: string;
+  nameEn: string;
+  nameKana: string;
+  nickname: string;
+  description: string;
+}
+
+export interface Person {
+  id: string;
+  annictId: number;
+  name: string;
+  nameEn: string;
+  nameKana: string;
+  nickname: string;
+  birthday: string;
+  bloodType: string;
+  genderText: string;
+  url: string;
+  wikipediaUrl: string;
+}
+
+export interface Organization {
+  id: string;
+  annictId: number;
+  name: string;
+  nameEn: string;
+  nameKana: string;
+  url: string;
+  wikipediaUrl: string;
+}
