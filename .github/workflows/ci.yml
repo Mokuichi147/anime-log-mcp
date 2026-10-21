@@ -15,7 +15,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # 2026-10-21 のセキュリティリリース（Brotli デコーダの境界外書き込みによる
+          # RCE、TLS のホスト名検証バイパスなど）で修正された 22.x の最初のバージョン。
+          # メジャーだけを書くと未修正の 22.x が選ばれても気づけないため、下限を明示する。
+          node-version: 22.23.4
           cache: npm
       - run: npm ci
       - run: npm run typecheck
