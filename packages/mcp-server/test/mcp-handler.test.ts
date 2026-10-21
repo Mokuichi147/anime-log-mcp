@@ -100,6 +100,10 @@ describe("stateless MCP handler", () => {
           "Content-Type": "application/json",
           Accept: "application/json, text/event-stream",
           "Mcp-Method": "tools/list",
+          // Required since SDK 2.3.0: the transport rejects a request whose
+          // header and body envelope disagree on the protocol version, so a
+          // body naming 2026-07-28 must carry the matching header.
+          "MCP-Protocol-Version": "2026-07-28",
         },
         body: JSON.stringify({
           jsonrpc: "2.0",
