@@ -3,12 +3,17 @@ export { AnnictApiError, AnnictGraphQLError, AnnictRateLimitError } from "./erro
 export { parseRetryAfter } from "./executor.js";
 export type {
   AnnictRecord,
+  Character,
   Connection,
   Episode,
   EpisodeSummary,
   LibraryEntry,
+  Organization,
   PageInfo,
+  Person,
+  SeriesSummary,
   StatusState,
+  User,
   Viewer,
   Work,
   WorkSummary,

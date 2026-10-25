@@ -223,14 +223,18 @@ Worker名を変えて(例: `annict-mcp-server` → `anime-log-mcp`)デプロイ�
 | ツール名 | 説明 |
 |---|---|
 | `annict_get_viewer` | 認証ユーザーのプロフィールと視聴ステータス件数を取得 |
+| `annict_get_user` | `username` を指定して他のAnnictユーザーのプロフィールと視聴ステータス件数を取得 |
 | `annict_get_library_entries` | 認証ユーザーのライブラリ(視聴記録中の作品)を、ステータスで絞り込んで一覧取得 |
 | `annict_search_works` | タイトル・シーズンで作品を検索 |
 | `annict_get_work` | 数値の `annictId` で作品を1件取得 |
 | `annict_get_episodes` | 作品の `annictId` からエピソード一覧を取得 |
+| `annict_search_characters` | 名前(または `annictId`)でアニメのキャラクターを検索。所属シリーズも一緒に返します |
+| `annict_search_people` | 名前(または `annictId`)で声優・監督などの人物を検索 |
+| `annict_search_organizations` | 名前(または `annictId`)で制作会社・スタジオを検索 |
 | `annict_record_episode` | エピソードを視聴済みとして記録(コメント任意) |
 | `annict_update_status` | 作品の視聴ステータスを更新 |
 
-一覧系の3ツール(`annict_get_library_entries` / `annict_search_works` / `annict_get_episodes`)はカーソルページネーションに対応しています。レスポンスの `pageInfo.hasNextPage` が `true` のとき、`pageInfo.endCursor` を次の呼び出しの `after` に渡すと続きを取得できます。`first` の既定値は25件です。
+一覧系のツール(`annict_get_library_entries` / `annict_search_works` / `annict_get_episodes` / `annict_search_characters` / `annict_search_people` / `annict_search_organizations`)はカーソルページネーションに対応しています。レスポンスの `pageInfo.hasNextPage` が `true` のとき、`pageInfo.endCursor` を次の呼び出しの `after` に渡すと続きを取得できます。`first` の既定値は25件です。
 
 `annict_record_episode` の `episodeId` と `annict_update_status` の `workId` は、AnnictのRelay形式のグローバルID(各オブジェクトの `id` フィールド)です。数値の `annictId` とは異なるので注意してください。`annict_get_episodes` や `annict_search_works` のレスポンスに含まれる `id` フィールドを利用します。
 

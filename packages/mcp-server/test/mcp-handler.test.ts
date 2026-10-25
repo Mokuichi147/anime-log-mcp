@@ -96,9 +96,13 @@ describe("stateless MCP handler", () => {
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       "annict_get_episodes",
       "annict_get_library_entries",
+      "annict_get_user",
       "annict_get_viewer",
       "annict_get_work",
       "annict_record_episode",
+      "annict_search_characters",
+      "annict_search_organizations",
+      "annict_search_people",
       "annict_search_works",
       "annict_update_status",
     ]);
@@ -148,7 +152,7 @@ describe("stateless MCP handler", () => {
         "io.modelcontextprotocol/serverInfo": { name: "anime-log-mcp" },
       },
     });
-    expect(body.result.tools).toHaveLength(7);
+    expect(body.result.tools).toHaveLength(11);
   });
 
   it("calls a tool with the Annict token taken from the request's grant", async () => {
@@ -177,6 +181,40 @@ describe("stateless MCP handler", () => {
 
     expect(result.isError).toBeFalsy();
     expect(annictFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a search that would have no filter at all", async () => {
+    const client = await connectClient();
+    const result = await client.callTool({ name: "annict_search_characters", arguments: {} });
+    await client.close();
+
+    expect(result.isError).toBe(true);
+    expect((result.content as Array<{ text: string }>)[0]!.text).toContain("'name' or 'annictId'");
+    // Nothing should have reached Annict.
+    expect(annictFetch).not.toHaveBeenCalled();
+  });
+
+  it("passes the singular search arguments through as Annict's list variables", async () => {
+    annictFetch.mockResolvedValueOnce(
+      graphqlResponse({
+        searchCharacters: {
+          edges: [],
+          pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null },
+        },
+      }),
+    );
+
+    const client = await connectClient();
+    const result = await client.callTool({
+      name: "annict_search_characters",
+      arguments: { name: "レム", annictId: 42 },
+    });
+    await client.close();
+
+    expect(result.isError).toBeFalsy();
+    const [, init] = annictFetch.mock.calls[0]!;
+    const body = JSON.parse((init as RequestInit).body as string) as { variables: Record<string, unknown> };
+    expect(body.variables).toMatchObject({ names: ["レム"], annictIds: [42], first: 25 });
   });
 
   it("deletes the grant when Annict rejects the token", async () => {
