@@ -1,4 +1,3 @@
-import type { GrantSummary } from "@cloudflare/workers-oauth-provider";
 import { type AuthInfo, createMcpHandler, preloadSchemas } from "@modelcontextprotocol/server";
 import { legacyOriginOf, migrationMessage } from "./migration.js";
 import { createAnnictMcpServer } from "./server.js";
@@ -17,8 +16,8 @@ preloadSchemas();
 interface AnnictAuthExtra extends Record<string, unknown> {
   annictAccessToken: string;
   annictUsername: string;
-  /** Deletes this request's grant and the user's older ones (see revokeUserGrants). */
-  revokeUserGrants: () => Promise<void>;
+  /** Deletes the grant this request authenticated with (see revokeRejectedGrant). */
+  revokeGrant: () => Promise<void>;
   /** Set when the request came in on an origin being retired (see migration.ts). */
   notice?: string;
   retiredMessage?: string;
@@ -47,7 +46,7 @@ const handler = createMcpHandler(
   (ctx) => {
     const extra = annictExtraOf(ctx.authInfo);
     return createAnnictMcpServer(extra.annictAccessToken, {
-      onUnauthorized: extra.revokeUserGrants,
+      onUnauthorized: extra.revokeGrant,
       notice: extra.notice,
       retiredMessage: extra.retiredMessage,
     });
@@ -79,44 +78,24 @@ function grantRefOf(token: string): GrantRef | null {
 
 /**
  * The Annict API Terms of Use (Art. 7) require deleting a user's data once
- * they unlink the application. The grants are the only place that data lives
- * (the Annict token and username), so revoking a grant deletes it along with
- * every token issued from it.
+ * they unlink the application. The grant is the only place that data lives
+ * (the Annict token and username), so revoking it deletes it along with every
+ * token issued from it.
  *
- * Which grants to revoke follows from what a 401 proves. Unlinking on Annict
- * is per application and kills every token that exists at that moment, so a
- * grant created before the rejected one was alive then too and is just as
- * dead. A grant created after it may come from re-authorizing after the unlink
- * — possibly on another MCP client, whose grant the provider keeps separately —
- * and may still work, so it is left alone: it goes when it is itself rejected,
- * or when it expires GRANT_TTL_DAYS after authorization.
+ * Only the rejected grant is revoked. A 401 proves nothing about the user's
+ * other grants: one may come from re-authorizing after the unlink, and neither
+ * grant creation order nor anything else this deployment can see tells such a
+ * grant apart from one that died with the unlink. Each other grant goes when
+ * it is itself rejected, or when it expires GRANT_TTL_DAYS after authorization.
  *
  * Throws rather than returning quietly when nothing can be revoked, so the
  * caller never tells the user their data was deleted when it was not.
  */
-async function revokeUserGrants(env: Env, ref: GrantRef | null): Promise<void> {
+async function revokeRejectedGrant(env: Env, ref: GrantRef | null): Promise<void> {
   if (!ref) {
     throw new Error("The access token does not identify a grant to revoke.");
   }
-  const grants: GrantSummary[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await env.OAUTH_PROVIDER.listUserGrants(ref.userId, { cursor });
-    grants.push(...page.items);
-    cursor = page.cursor;
-  } while (cursor);
-
-  // The rejected grant itself is always revoked. If it is not listed yet (KV
-  // listings are eventually consistent), its creation time is unknown, and no
-  // other grant can safely be judged older than it.
-  const rejected = grants.find((grant) => grant.id === ref.grantId);
-  const grantIds = new Set([ref.grantId]);
-  if (rejected) {
-    for (const grant of grants) {
-      if (grant.createdAt < rejected.createdAt) grantIds.add(grant.id);
-    }
-  }
-  await Promise.all([...grantIds].map((grantId) => env.OAUTH_PROVIDER.revokeGrant(grantId, ref.userId)));
+  await env.OAUTH_PROVIDER.revokeGrant(ref.grantId, ref.userId);
 }
 
 /**
@@ -136,7 +115,7 @@ export const mcpApiHandler = {
       extra: {
         annictAccessToken: props.annictAccessToken,
         annictUsername: props.annictUsername,
-        revokeUserGrants: () => revokeUserGrants(env, grantRef),
+        revokeGrant: () => revokeRejectedGrant(env, grantRef),
         notice: legacy?.phase === "notice" ? migrationMessage(legacy) : undefined,
         retiredMessage: legacy?.phase === "retired" ? migrationMessage(legacy) : undefined,
       } satisfies AnnictAuthExtra,
