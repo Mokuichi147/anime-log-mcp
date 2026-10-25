@@ -1,3 +1,4 @@
+import type { GrantSummary } from "@cloudflare/workers-oauth-provider";
 import { type AuthInfo, createMcpHandler, preloadSchemas } from "@modelcontextprotocol/server";
 import { legacyOriginOf, migrationMessage } from "./migration.js";
 import { createAnnictMcpServer } from "./server.js";
@@ -16,7 +17,7 @@ preloadSchemas();
 interface AnnictAuthExtra extends Record<string, unknown> {
   annictAccessToken: string;
   annictUsername: string;
-  /** Deletes every grant of the user this request authenticated as. */
+  /** Deletes this request's grant and the user's older ones (see revokeUserGrants). */
   revokeUserGrants: () => Promise<void>;
   /** Set when the request came in on an origin being retired (see migration.ts). */
   notice?: string;
@@ -78,11 +79,17 @@ function grantRefOf(token: string): GrantRef | null {
 
 /**
  * The Annict API Terms of Use (Art. 7) require deleting a user's data once
- * they unlink the application. Unlinking on Annict is per application, so a
- * 401 means every Annict token this deployment holds for the user is dead —
- * including those of their other MCP clients. The grants are the only place
- * that data lives (the Annict token and username), so all of the user's grants
- * are revoked, along with every token issued from them.
+ * they unlink the application. The grants are the only place that data lives
+ * (the Annict token and username), so revoking a grant deletes it along with
+ * every token issued from it.
+ *
+ * Which grants to revoke follows from what a 401 proves. Unlinking on Annict
+ * is per application and kills every token that exists at that moment, so a
+ * grant created before the rejected one was alive then too and is just as
+ * dead. A grant created after it may come from re-authorizing after the unlink
+ * — possibly on another MCP client, whose grant the provider keeps separately —
+ * and may still work, so it is left alone: it goes when it is itself rejected,
+ * or when it expires GRANT_TTL_DAYS after authorization.
  *
  * Throws rather than returning quietly when nothing can be revoked, so the
  * caller never tells the user their data was deleted when it was not.
@@ -91,15 +98,24 @@ async function revokeUserGrants(env: Env, ref: GrantRef | null): Promise<void> {
   if (!ref) {
     throw new Error("The access token does not identify a grant to revoke.");
   }
-  // The caller's own grant is included explicitly: KV listings are eventually
-  // consistent, so a grant created moments ago might not be listed yet.
-  const grantIds = new Set([ref.grantId]);
+  const grants: GrantSummary[] = [];
   let cursor: string | undefined;
   do {
     const page = await env.OAUTH_PROVIDER.listUserGrants(ref.userId, { cursor });
-    for (const grant of page.items) grantIds.add(grant.id);
+    grants.push(...page.items);
     cursor = page.cursor;
   } while (cursor);
+
+  // The rejected grant itself is always revoked. If it is not listed yet (KV
+  // listings are eventually consistent), its creation time is unknown, and no
+  // other grant can safely be judged older than it.
+  const rejected = grants.find((grant) => grant.id === ref.grantId);
+  const grantIds = new Set([ref.grantId]);
+  if (rejected) {
+    for (const grant of grants) {
+      if (grant.createdAt < rejected.createdAt) grantIds.add(grant.id);
+    }
+  }
   await Promise.all([...grantIds].map((grantId) => env.OAUTH_PROVIDER.revokeGrant(grantId, ref.userId)));
 }
 

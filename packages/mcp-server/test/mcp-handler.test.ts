@@ -85,7 +85,7 @@ describe("stateless MCP handler", () => {
     annictFetch = vi.fn(async () => graphqlResponse({ viewer: VIEWER }));
     vi.stubGlobal("fetch", annictFetch);
     oauthProvider.unwrapToken.mockReset().mockResolvedValue({ grantId: "grant-1", userId: "1" });
-    oauthProvider.listUserGrants.mockReset().mockResolvedValue({ items: [{ id: "grant-1" }] });
+    oauthProvider.listUserGrants.mockReset().mockResolvedValue({ items: [{ id: "grant-1", createdAt: 1_000 }] });
     oauthProvider.revokeGrant.mockReset().mockResolvedValue(undefined);
   });
 
@@ -237,13 +237,22 @@ describe("stateless MCP handler", () => {
     expect(oauthProvider.revokeGrant).toHaveBeenCalledWith("grant-1", "1");
   });
 
-  it("deletes the user's grants from their other MCP clients too", async () => {
+  it("deletes the user's older grants from other MCP clients, but not newer ones", async () => {
     annictFetch.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
-    // Two pages, the second reached through the cursor; the caller's own
-    // grant-1 is not listed yet, as can happen with a just-written KV entry.
+    // Client A (grant-1) was authorized, the user unlinked the app on Annict
+    // and then re-authorized on client B (grant-3). A's 401 says nothing about
+    // B, which may well be working; grant-2 and grant-4 predate A, so they
+    // were alive at the unlink and died with it. Two pages, via the cursor.
     oauthProvider.listUserGrants
-      .mockResolvedValueOnce({ items: [{ id: "grant-2" }, { id: "grant-3" }], cursor: "next" })
-      .mockResolvedValueOnce({ items: [{ id: "grant-4" }] });
+      .mockResolvedValueOnce({
+        items: [
+          { id: "grant-1", createdAt: 1_000 },
+          { id: "grant-2", createdAt: 500 },
+          { id: "grant-3", createdAt: 2_000 },
+        ],
+        cursor: "next",
+      })
+      .mockResolvedValueOnce({ items: [{ id: "grant-4", createdAt: 100 }] });
 
     const client = await connectClient();
     await client.callTool({ name: "annict_get_viewer", arguments: {} });
@@ -252,7 +261,20 @@ describe("stateless MCP handler", () => {
     expect(oauthProvider.listUserGrants).toHaveBeenNthCalledWith(1, "1", { cursor: undefined });
     expect(oauthProvider.listUserGrants).toHaveBeenNthCalledWith(2, "1", { cursor: "next" });
     const revoked = oauthProvider.revokeGrant.mock.calls.map(([grantId, userId]) => `${userId}/${grantId}`);
-    expect(revoked.sort()).toEqual(["1/grant-1", "1/grant-2", "1/grant-3", "1/grant-4"]);
+    expect(revoked.sort()).toEqual(["1/grant-1", "1/grant-2", "1/grant-4"]);
+  });
+
+  it("deletes only the rejected grant when it is not listed yet", async () => {
+    annictFetch.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
+    // A just-written KV entry can be missing from a listing; without the
+    // rejected grant's creation time no other grant is known to be older.
+    oauthProvider.listUserGrants.mockResolvedValueOnce({ items: [{ id: "grant-2", createdAt: 500 }] });
+
+    const client = await connectClient();
+    await client.callTool({ name: "annict_get_viewer", arguments: {} });
+    await client.close();
+
+    expect(oauthProvider.revokeGrant.mock.calls).toEqual([["grant-1", "1"]]);
   });
 
   it("deletes the grants even if the MCP token expires while Annict is answering", async () => {
