@@ -107,7 +107,7 @@ export function createAnnictMcpServer(annictAccessToken: string, options: Annict
     return errorResult(
       new Error(
         "Annict rejected the access token (HTTP 401), most likely because the user unlinked this application on Annict. " +
-          "The authorization stored on this server has been deleted; reconnect to authorize again.",
+          "Every authorization this server stored for the Annict account has been deleted; reconnect to authorize again.",
       ),
     );
   }

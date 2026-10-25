@@ -19,9 +19,13 @@ function executionContext(props: Props = PROPS): ExecutionContext {
 
 const MCP_TOKEN = "1:grant-1:secret";
 
-/** Only the two helpers the MCP handler uses to delete a grant. */
+/**
+ * The helpers the MCP handler could use to delete grants. unwrapToken is kept
+ * only to prove the cleanup does not depend on it (see the expiry test).
+ */
 const oauthProvider = {
   unwrapToken: vi.fn(),
+  listUserGrants: vi.fn(),
   revokeGrant: vi.fn(),
 };
 
@@ -81,6 +85,7 @@ describe("stateless MCP handler", () => {
     annictFetch = vi.fn(async () => graphqlResponse({ viewer: VIEWER }));
     vi.stubGlobal("fetch", annictFetch);
     oauthProvider.unwrapToken.mockReset().mockResolvedValue({ grantId: "grant-1", userId: "1" });
+    oauthProvider.listUserGrants.mockReset().mockResolvedValue({ items: [{ id: "grant-1" }] });
     oauthProvider.revokeGrant.mockReset().mockResolvedValue(undefined);
   });
 
@@ -229,8 +234,55 @@ describe("stateless MCP handler", () => {
     expect(text).toContain("401");
     expect(text).toContain("has been deleted");
     // The user unlinked the app on Annict, so their stored token goes too.
-    expect(oauthProvider.unwrapToken).toHaveBeenCalledWith(MCP_TOKEN);
     expect(oauthProvider.revokeGrant).toHaveBeenCalledWith("grant-1", "1");
+  });
+
+  it("deletes the user's grants from their other MCP clients too", async () => {
+    annictFetch.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
+    // Two pages, the second reached through the cursor; the caller's own
+    // grant-1 is not listed yet, as can happen with a just-written KV entry.
+    oauthProvider.listUserGrants
+      .mockResolvedValueOnce({ items: [{ id: "grant-2" }, { id: "grant-3" }], cursor: "next" })
+      .mockResolvedValueOnce({ items: [{ id: "grant-4" }] });
+
+    const client = await connectClient();
+    await client.callTool({ name: "annict_get_viewer", arguments: {} });
+    await client.close();
+
+    expect(oauthProvider.listUserGrants).toHaveBeenNthCalledWith(1, "1", { cursor: undefined });
+    expect(oauthProvider.listUserGrants).toHaveBeenNthCalledWith(2, "1", { cursor: "next" });
+    const revoked = oauthProvider.revokeGrant.mock.calls.map(([grantId, userId]) => `${userId}/${grantId}`);
+    expect(revoked.sort()).toEqual(["1/grant-1", "1/grant-2", "1/grant-3", "1/grant-4"]);
+  });
+
+  it("deletes the grants even if the MCP token expires while Annict is answering", async () => {
+    annictFetch.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
+    // What unwrapToken() returns once the token has expired.
+    oauthProvider.unwrapToken.mockResolvedValue(null);
+
+    const client = await connectClient();
+    const result = await client.callTool({ name: "annict_get_viewer", arguments: {} });
+    await client.close();
+
+    expect(oauthProvider.revokeGrant).toHaveBeenCalledWith("grant-1", "1");
+    expect(oauthProvider.unwrapToken).not.toHaveBeenCalled();
+    expect((result.content as Array<{ text: string }>)[0]!.text).toContain("has been deleted");
+  });
+
+  it("does not claim the data was deleted when revoking fails", async () => {
+    annictFetch.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
+    oauthProvider.listUserGrants.mockRejectedValueOnce(new Error("KV unavailable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const client = await connectClient();
+    const result = await client.callTool({ name: "annict_get_viewer", arguments: {} });
+    await client.close();
+    consoleError.mockRestore();
+
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ text: string }>)[0]!.text;
+    expect(text).toContain("401");
+    expect(text).not.toContain("deleted");
   });
 
   it("keeps the grant on errors other than 401", async () => {

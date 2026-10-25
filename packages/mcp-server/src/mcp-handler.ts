@@ -16,8 +16,8 @@ preloadSchemas();
 interface AnnictAuthExtra extends Record<string, unknown> {
   annictAccessToken: string;
   annictUsername: string;
-  /** Deletes the grant this request authenticated with. */
-  revokeGrant: () => Promise<void>;
+  /** Deletes every grant of the user this request authenticated as. */
+  revokeUserGrants: () => Promise<void>;
   /** Set when the request came in on an origin being retired (see migration.ts). */
   notice?: string;
   retiredMessage?: string;
@@ -46,7 +46,7 @@ const handler = createMcpHandler(
   (ctx) => {
     const extra = annictExtraOf(ctx.authInfo);
     return createAnnictMcpServer(extra.annictAccessToken, {
-      onUnauthorized: extra.revokeGrant,
+      onUnauthorized: extra.revokeUserGrants,
       notice: extra.notice,
       retiredMessage: extra.retiredMessage,
     });
@@ -59,17 +59,48 @@ function bearerToken(request: Request): string {
   return /^bearer /i.test(header) ? header.slice("bearer ".length) : "";
 }
 
+interface GrantRef {
+  userId: string;
+  grantId: string;
+}
+
+/**
+ * The provider's access tokens are `{userId}:{grantId}:{secret}`, and it has
+ * already looked this one up by those parts before calling us. Reading them
+ * here, when the request arrives, keeps the later cleanup independent of the
+ * token's remaining lifetime: unwrapToken() would return null if the token
+ * expired while Annict was being called.
+ */
+function grantRefOf(token: string): GrantRef | null {
+  const [userId, grantId, secret] = token.split(":");
+  return userId && grantId && secret ? { userId, grantId } : null;
+}
+
 /**
  * The Annict API Terms of Use (Art. 7) require deleting a user's data once
- * they unlink the application. The grant is the only place this deployment
- * keeps it (the Annict token and username), so revoking the grant deletes it
- * along with every token issued from it.
+ * they unlink the application. Unlinking on Annict is per application, so a
+ * 401 means every Annict token this deployment holds for the user is dead —
+ * including those of their other MCP clients. The grants are the only place
+ * that data lives (the Annict token and username), so all of the user's grants
+ * are revoked, along with every token issued from them.
+ *
+ * Throws rather than returning quietly when nothing can be revoked, so the
+ * caller never tells the user their data was deleted when it was not.
  */
-async function revokeGrantOf(env: Env, token: string): Promise<void> {
-  const summary = await env.OAUTH_PROVIDER.unwrapToken(token);
-  if (summary) {
-    await env.OAUTH_PROVIDER.revokeGrant(summary.grantId, summary.userId);
+async function revokeUserGrants(env: Env, ref: GrantRef | null): Promise<void> {
+  if (!ref) {
+    throw new Error("The access token does not identify a grant to revoke.");
   }
+  // The caller's own grant is included explicitly: KV listings are eventually
+  // consistent, so a grant created moments ago might not be listed yet.
+  const grantIds = new Set([ref.grantId]);
+  let cursor: string | undefined;
+  do {
+    const page = await env.OAUTH_PROVIDER.listUserGrants(ref.userId, { cursor });
+    for (const grant of page.items) grantIds.add(grant.id);
+    cursor = page.cursor;
+  } while (cursor);
+  await Promise.all([...grantIds].map((grantId) => env.OAUTH_PROVIDER.revokeGrant(grantId, ref.userId)));
 }
 
 /**
@@ -80,6 +111,7 @@ export const mcpApiHandler = {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const props = ctx.props as Props;
     const token = bearerToken(request);
+    const grantRef = grantRefOf(token);
     const legacy = legacyOriginOf(env, new URL(request.url));
     const authInfo: AuthInfo = {
       token,
@@ -88,7 +120,7 @@ export const mcpApiHandler = {
       extra: {
         annictAccessToken: props.annictAccessToken,
         annictUsername: props.annictUsername,
-        revokeGrant: () => revokeGrantOf(env, token),
+        revokeUserGrants: () => revokeUserGrants(env, grantRef),
         notice: legacy?.phase === "notice" ? migrationMessage(legacy) : undefined,
         retiredMessage: legacy?.phase === "retired" ? migrationMessage(legacy) : undefined,
       } satisfies AnnictAuthExtra,

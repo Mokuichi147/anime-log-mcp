@@ -15,7 +15,7 @@ const MIGRATION_VARS = { CANONICAL_ORIGIN: NEW_ORIGIN, LEGACY_ORIGINS: OLD_ORIGI
 
 function envWith(vars: Partial<Env>): Env {
   return {
-    OAUTH_PROVIDER: { unwrapToken: vi.fn(), revokeGrant: vi.fn() },
+    OAUTH_PROVIDER: { listUserGrants: vi.fn(), revokeGrant: vi.fn() },
     ...vars,
   } as unknown as Env;
 }
