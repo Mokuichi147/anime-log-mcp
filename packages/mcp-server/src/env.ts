@@ -8,6 +8,15 @@ export interface Env {
   ANNICT_CLIENT_SECRET: string;
   /** Injected by OAuthProvider before the default handler runs. */
   OAUTH_PROVIDER: OAuthHelpers;
+  /**
+   * Optional URL move (see migration.ts). Where the deployment now lives,
+   * e.g. "https://mcp.example.com"; requires LEGACY_ORIGINS.
+   */
+  CANONICAL_ORIGIN?: string;
+  /** Comma-separated origins being retired in favour of CANONICAL_ORIGIN. */
+  LEGACY_ORIGINS?: string;
+  /** When the legacy origins stop working, as ISO 8601 with an offset. Unset: they keep working. */
+  LEGACY_SUNSET?: string;
 }
 
 /**

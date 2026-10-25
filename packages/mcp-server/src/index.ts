@@ -1,7 +1,7 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import type { Env } from "./env.js";
 import { mcpApiHandler } from "./mcp-handler.js";
-import { annictOAuthHandler } from "./oauth-handler.js";
+import { annictOAuthHandler, GRANT_TTL_DAYS } from "./oauth-handler.js";
 
 export type { Env, Props } from "./env.js";
 export { createAnnictMcpServer } from "./server.js";
@@ -19,4 +19,7 @@ export default new OAuthProvider<Env>({
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/token",
   clientRegistrationEndpoint: "/register",
+  // The library's default, set explicitly because the consent screen promises
+  // this retention bound. The grant expires this long after authorization.
+  refreshTokenTTL: GRANT_TTL_DAYS * 24 * 60 * 60,
 });

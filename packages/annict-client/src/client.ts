@@ -1,4 +1,4 @@
-import { execute } from "./executor.js";
+import { execute, type RateLimitPolicy } from "./executor.js";
 import { SEARCH_CHARACTERS_QUERY, type SearchCharactersQueryData } from "./queries/characters.js";
 import { CREATE_RECORD_MUTATION, type CreateRecordMutationData } from "./queries/create-record.js";
 import { WORK_EPISODES_QUERY, type WorkEpisodesQueryData } from "./queries/episodes.js";
@@ -26,12 +26,23 @@ import type {
 
 const DEFAULT_ENDPOINT = "https://api.annict.com/graphql";
 
+/** Short enough to keep a retried request well inside typical MCP tool-call timeouts. */
+const DEFAULT_RATE_LIMIT_MAX_WAIT_SECONDS = 10;
+
 export interface AnnictClientOptions {
   accessToken: string;
   /** Defaults to the official Annict GraphQL endpoint. */
   endpoint?: string;
   /** Defaults to `globalThis.fetch`. Override for testing or non-standard runtimes. */
   fetch?: typeof fetch;
+  /**
+   * When Annict answers 429 with a `Retry-After` of at most this many seconds,
+   * the request is sent once more after waiting that long. Longer waits throw
+   * `AnnictRateLimitError` immediately. 0 disables the retry. Defaults to 10.
+   */
+  rateLimitMaxWaitSeconds?: number;
+  /** Defaults to a `setTimeout`-based sleep. Override for testing. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 function toConnection<T>(raw: RawConnection<T>): Connection<T> {
@@ -45,15 +56,20 @@ export class AnnictClient {
   private readonly endpoint: string;
   private readonly accessToken: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly rateLimit: RateLimitPolicy;
 
   constructor(options: AnnictClientOptions) {
     this.accessToken = options.accessToken;
     this.endpoint = options.endpoint ?? DEFAULT_ENDPOINT;
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+    this.rateLimit = {
+      maxWaitSeconds: options.rateLimitMaxWaitSeconds ?? DEFAULT_RATE_LIMIT_MAX_WAIT_SECONDS,
+      sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+    };
   }
 
   private request<TData>(query: string, variables: Record<string, unknown>): Promise<TData> {
-    return execute<TData>(this.endpoint, this.accessToken, query, variables, this.fetchImpl);
+    return execute<TData>(this.endpoint, this.accessToken, query, variables, this.fetchImpl, this.rateLimit);
   }
 
   async getViewer(): Promise<Viewer> {

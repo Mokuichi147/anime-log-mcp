@@ -1,5 +1,6 @@
 export { AnnictClient, type AnnictClientOptions } from "./client.js";
-export { AnnictApiError, AnnictGraphQLError } from "./errors.js";
+export { AnnictApiError, AnnictGraphQLError, AnnictRateLimitError } from "./errors.js";
+export { parseRetryAfter } from "./executor.js";
 export type {
   AnnictRecord,
   Character,
