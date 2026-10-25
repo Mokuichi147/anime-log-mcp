@@ -303,10 +303,18 @@ export const annictOAuthHandler = {
     const legacy = legacyOriginOf(env, url);
     const banner = legacy ? migrationBannerHtml(legacy, escapeHtml) : "";
 
+    // Users on a retired origin are sent to the new one rather than given a
+    // grant there; /authorize is where a client lands once its old grant
+    // expires. /callback is closed too: a flow begun before the sunset could
+    // otherwise still complete within PENDING_TTL_SECONDS after it, and the
+    // promise that every old grant is gone GRANT_TTL_DAYS after the sunset
+    // would no longer hold. Returning here also skips the code exchange, so
+    // Annict issues no token either.
+    if (legacy?.phase === "retired" && (url.pathname === "/authorize" || url.pathname === "/callback")) {
+      return migrationPage(legacy);
+    }
+
     if (url.pathname === "/authorize") {
-      // Users on a retired origin are sent to the new one rather than given a
-      // grant there; this is where a client lands once its old grant expires.
-      if (legacy?.phase === "retired") return migrationPage(legacy);
       if (request.method === "GET") return handleAuthorizeGet(request, env, url, banner);
       if (request.method === "POST") return handleAuthorizePost(request, env, url);
       return new Response("Method not allowed", { status: 405 });

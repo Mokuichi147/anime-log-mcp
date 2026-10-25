@@ -151,6 +151,30 @@ describe("pages on a legacy origin", () => {
     expect(html).toContain(`${NEW_ORIGIN}/mcp`);
   });
 
+  it("refuse to complete a flow that began before the sunset and returns after it", async () => {
+    vi.useFakeTimers({ now: AFTER_SUNSET, toFake: ["Date"] });
+    const tokenFetch = vi.fn();
+    vi.stubGlobal("fetch", tokenFetch);
+    const oauthKv = { get: vi.fn(async () => JSON.stringify({ clientId: "c", scope: [] })), delete: vi.fn() };
+    const envWithState = { ...env, OAUTH_KV: oauthKv } as unknown as Env;
+
+    // The state cookie and KV entry are still valid, as they would be within
+    // ten minutes of an approval given just before the sunset.
+    const response = await annictOAuthHandler.fetch(
+      new Request(`${OLD_ORIGIN}/callback?code=annict-code&state=s1`, {
+        headers: { Cookie: "__Host-annict_mcp_state=s1" },
+      }),
+      envWithState,
+    );
+    vi.unstubAllGlobals();
+
+    expect(response.status).toBe(410);
+    expect(await response.text()).toContain(`${NEW_ORIGIN}/mcp`);
+    // Neither the code exchange with Annict nor the grant was attempted.
+    expect(tokenFetch).not.toHaveBeenCalled();
+    expect(oauthKv.get).not.toHaveBeenCalled();
+  });
+
   it("leave the new origin's top page as it was", async () => {
     const response = await annictOAuthHandler.fetch(new Request(`${NEW_ORIGIN}/`), env);
     const html = await response.text();
