@@ -1,6 +1,7 @@
-import { AnnictClient } from "@annict-mcp/annict-client";
+import { AnnictClient, AnnictRateLimitError, parseRetryAfter, type Viewer } from "@anime-log-mcp/annict-client";
 import type { AuthRequest, ClientInfo } from "@cloudflare/workers-oauth-provider";
 import type { Env, Props } from "./env.js";
+import { type LegacyOrigin, legacyOriginOf, migrationBannerHtml } from "./migration.js";
 
 const ANNICT_AUTHORIZE_URL = "https://api.annict.com/oauth/authorize";
 const ANNICT_TOKEN_URL = "https://api.annict.com/oauth/token";
@@ -9,6 +10,13 @@ const ANNICT_TOKEN_URL = "https://api.annict.com/oauth/token";
 const ANNICT_SCOPE = "read write";
 
 const PENDING_TTL_SECONDS = 600;
+
+/**
+ * How long a grant — and with it the stored Annict token and username — lives
+ * after authorization. Refreshing does not extend it, so this is the upper
+ * bound on how long a user's data is kept; the consent screen states it.
+ */
+export const GRANT_TTL_DAYS = 30;
 const CSRF_COOKIE = "annict_mcp_csrf";
 const STATE_COOKIE = "annict_mcp_state";
 
@@ -73,18 +81,38 @@ function htmlResponse(body: string, extraHeaders: Record<string, string> = {}): 
 
 function errorPage(message: string, status: number): Response {
   return new Response(
-    `<!doctype html><meta charset="utf-8"><title>unofficial-annict-mcp-server</title><h1>認可できませんでした</h1><p>${escapeHtml(message)}</p>`,
+    `<!doctype html><meta charset="utf-8"><title>anime-log-mcp</title><h1>認可できませんでした</h1><p>${escapeHtml(message)}</p>`,
     { status, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
 }
 
-function renderConsent(client: ClientInfo, csrf: string): string {
+function rateLimitedPage(retryAfterSeconds: number | null): Response {
+  const wait = retryAfterSeconds === null ? "しばらく" : `${retryAfterSeconds}秒ほど`;
+  return errorPage(`Annictへのリクエストが上限に達しました。${wait}待ってから最初からやり直してください。`, 429);
+}
+
+const NOTICE_STYLE =
+  ".notice { background: #fff8e5; border-left: 4px solid #d29922; border-radius: 4px; padding: .75rem 1rem; }";
+
+/** Shown on a retired origin instead of anything that would issue a grant. */
+function migrationPage(legacy: LegacyOrigin): Response {
+  return new Response(
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCPサーバーのURLが変わりました</title>
+<style>body { font-family: system-ui, sans-serif; max-width: 34rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.7; } ${NOTICE_STYLE}</style>
+<h1>MCPサーバーのURLが変わりました</h1>
+${migrationBannerHtml(legacy, escapeHtml)}`,
+    { status: 410, headers: { "Content-Type": "text/html; charset=utf-8" } },
+  );
+}
+
+function renderConsent(client: ClientInfo, csrf: string, banner: string): string {
   const name = escapeHtml(client.clientName || client.clientId);
   const redirect = escapeHtml(client.redirectUris[0] ?? "(未登録)");
   return `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>unofficial-annict-mcp-server へのアクセス許可</title>
+<title>anime-log-mcp へのアクセス許可</title>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 34rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.7; }
   dl { background: #f6f6f7; border-radius: 8px; padding: 1rem 1.25rem; }
@@ -94,9 +122,10 @@ function renderConsent(client: ClientInfo, csrf: string): string {
   button { font-size: 1rem; padding: .6rem 1.4rem; border-radius: 6px; border: 0; cursor: pointer; }
   .approve { background: #1a7f37; color: #fff; }
   .deny { background: #eee; }
-  .notice { background: #fff8e5; border-left: 4px solid #d29922; border-radius: 4px; padding: .75rem 1rem; }
+  ${NOTICE_STYLE}
 </style>
 <h1>アクセスを許可しますか？</h1>
+${banner}
 <p><strong>${name}</strong> があなたのAnnictアカウントへのアクセスを求めています。</p>
 <dl>
   <dt>クライアント</dt><dd>${name}</dd>
@@ -105,6 +134,7 @@ function renderConsent(client: ClientInfo, csrf: string): string {
 </dl>
 <p class="notice"><strong>これはAnnict非公式のサーバーです。</strong>Annictの運営とは関係ありません。
 許可すると、あなたのAnnictアクセストークンがこのサーバーに保存され、<strong>このサーバーを運用している人が、あなたのAnnictアカウントとして操作できる状態になります</strong>（視聴記録の作成やステータスの変更を含む）。運用者を信頼できる場合のみ許可してください。</p>
+<p>保存するのはAnnictのアクセストークンとユーザー名だけです。Annictの設定でこのアプリとの連携を解除すると、次にツールが呼ばれた時点で削除します。連携を解除しなくても、許可から${GRANT_TTL_DAYS}日で自動的に削除され、改めて許可が必要になります。</p>
 <p>許可すると、続けてAnnictのログイン画面に進みます。</p>
 <form method="post">
   <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
@@ -119,7 +149,7 @@ function renderConsent(client: ClientInfo, csrf: string): string {
  * before any redirect to Annict — otherwise a returning user's Annict consent
  * cookie would let a newly registered client skip consent entirely.
  */
-async function handleAuthorizeGet(request: Request, env: Env, url: URL): Promise<Response> {
+async function handleAuthorizeGet(request: Request, env: Env, url: URL, banner: string): Promise<Response> {
   const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
   const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
   if (!client) {
@@ -133,7 +163,7 @@ async function handleAuthorizeGet(request: Request, env: Env, url: URL): Promise
     expirationTtl: PENDING_TTL_SECONDS,
   });
 
-  return htmlResponse(renderConsent(client, csrf), {
+  return htmlResponse(renderConsent(client, csrf, banner), {
     "Set-Cookie": setCookie(url, CSRF_COOKIE, csrf, PENDING_TTL_SECONDS),
   });
 }
@@ -220,6 +250,9 @@ async function handleCallback(request: Request, env: Env, url: URL): Promise<Res
     }),
   });
 
+  if (tokenRes.status === 429) {
+    return rateLimitedPage(parseRetryAfter(tokenRes.headers.get("retry-after")));
+  }
   if (!tokenRes.ok) {
     return errorPage(`Annictのトークン発行に失敗しました (HTTP ${tokenRes.status})`, 502);
   }
@@ -230,7 +263,15 @@ async function handleCallback(request: Request, env: Env, url: URL): Promise<Res
   }
 
   // Identify the user so the grant is attributed to their Annict account.
-  const viewer = await new AnnictClient({ accessToken: token.access_token }).getViewer();
+  // The browser is waiting on this redirect, so a 429 is reported rather than
+  // waited out.
+  let viewer: Viewer;
+  try {
+    viewer = await new AnnictClient({ accessToken: token.access_token, rateLimitMaxWaitSeconds: 0 }).getViewer();
+  } catch (error) {
+    if (error instanceof AnnictRateLimitError) return rateLimitedPage(error.retryAfterSeconds);
+    throw error;
+  }
 
   const props: Props = {
     annictAccessToken: token.access_token,
@@ -244,7 +285,9 @@ async function handleCallback(request: Request, env: Env, url: URL): Promise<Res
   const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
     request: authRequest,
     userId: String(viewer.annictId),
-    metadata: { username: viewer.username, name: viewer.name },
+    // Metadata is stored unencrypted, so it carries only what an operator needs
+    // to find a user's grant (e.g. for a deletion request) — not the display name.
+    metadata: { username: viewer.username },
     scope: authRequest.scope,
     props,
   });
@@ -257,9 +300,14 @@ async function handleCallback(request: Request, env: Env, url: URL): Promise<Res
 export const annictOAuthHandler = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const legacy = legacyOriginOf(env, url);
+    const banner = legacy ? migrationBannerHtml(legacy, escapeHtml) : "";
 
     if (url.pathname === "/authorize") {
-      if (request.method === "GET") return handleAuthorizeGet(request, env, url);
+      // Users on a retired origin are sent to the new one rather than given a
+      // grant there; this is where a client lands once its old grant expires.
+      if (legacy?.phase === "retired") return migrationPage(legacy);
+      if (request.method === "GET") return handleAuthorizeGet(request, env, url, banner);
       if (request.method === "POST") return handleAuthorizePost(request, env, url);
       return new Response("Method not allowed", { status: 405 });
     }
@@ -269,11 +317,15 @@ export const annictOAuthHandler = {
     }
 
     if (url.pathname === "/") {
+      if (legacy?.phase === "retired") return migrationPage(legacy);
+      const origin = legacy?.canonicalOrigin ?? url.origin;
       return htmlResponse(
-        `<!doctype html><meta charset="utf-8"><title>unofficial-annict-mcp-server</title>
-<h1>unofficial-annict-mcp-server</h1>
+        `<!doctype html><meta charset="utf-8"><title>anime-log-mcp</title>
+<style>${NOTICE_STYLE}</style>
+<h1>anime-log-mcp</h1>
+${banner}
 <p>Annictの公式GraphQL APIを利用した、非公式のMCPサーバーです。Annictの運営とは関係ありません。MCPクライアントに次のURLを登録してください。</p>
-<pre>${escapeHtml(url.origin)}/mcp</pre>`,
+<pre>${escapeHtml(origin)}/mcp</pre>`,
       );
     }
 

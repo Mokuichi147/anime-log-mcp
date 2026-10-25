@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mcpApiHandler } from "../src/mcp-handler.js";
 import type { Env, Props } from "../src/env.js";
 
-const SERVER_URL = new URL("https://annict-mcp.test/mcp");
+const SERVER_URL = new URL("https://anime-log-mcp.test/mcp");
 
 const PROPS: Props = {
   annictAccessToken: "annict-token",
@@ -17,7 +17,15 @@ function executionContext(props: Props = PROPS): ExecutionContext {
   return { props, waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
 }
 
-const env = {} as Env;
+const MCP_TOKEN = "1:grant-1:secret";
+
+/** Only the two helpers the MCP handler uses to delete a grant. */
+const oauthProvider = {
+  unwrapToken: vi.fn(),
+  revokeGrant: vi.fn(),
+};
+
+const env = { OAUTH_PROVIDER: oauthProvider } as unknown as Env;
 
 /**
  * Every request is served in isolation, exactly as a Worker isolate would:
@@ -35,7 +43,11 @@ async function connectClient(): Promise<Client> {
     { versionNegotiation: { mode: { pin: "2026-07-28" } } },
   );
   const transport = new StreamableHTTPClientTransport(SERVER_URL, {
-    fetch: (url, init) => serve(new Request(url, init)),
+    fetch: (url, init) => {
+      const request = new Request(url, init);
+      request.headers.set("Authorization", `Bearer ${MCP_TOKEN}`);
+      return serve(request);
+    },
   });
   await client.connect(transport);
   return client;
@@ -68,6 +80,8 @@ describe("stateless MCP handler", () => {
   beforeEach(() => {
     annictFetch = vi.fn(async () => graphqlResponse({ viewer: VIEWER }));
     vi.stubGlobal("fetch", annictFetch);
+    oauthProvider.unwrapToken.mockReset().mockResolvedValue({ grantId: "grant-1", userId: "1" });
+    oauthProvider.revokeGrant.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -131,7 +145,7 @@ describe("stateless MCP handler", () => {
       ttlMs: expect.any(Number),
       cacheScope: "private",
       _meta: {
-        "io.modelcontextprotocol/serverInfo": { name: "unofficial-annict-mcp-server" },
+        "io.modelcontextprotocol/serverInfo": { name: "anime-log-mcp" },
       },
     });
     expect(body.result.tools).toHaveLength(7);
@@ -165,7 +179,7 @@ describe("stateless MCP handler", () => {
     expect(annictFetch).toHaveBeenCalledTimes(2);
   });
 
-  it("reports the tool call as an error when Annict rejects the token", async () => {
+  it("deletes the grant when Annict rejects the token", async () => {
     annictFetch.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
 
     const client = await connectClient();
@@ -173,6 +187,41 @@ describe("stateless MCP handler", () => {
     await client.close();
 
     expect(result.isError).toBe(true);
-    expect((result.content as Array<{ text: string }>)[0]!.text).toContain("401");
+    const text = (result.content as Array<{ text: string }>)[0]!.text;
+    expect(text).toContain("401");
+    expect(text).toContain("has been deleted");
+    // The user unlinked the app on Annict, so their stored token goes too.
+    expect(oauthProvider.unwrapToken).toHaveBeenCalledWith(MCP_TOKEN);
+    expect(oauthProvider.revokeGrant).toHaveBeenCalledWith("grant-1", "1");
+  });
+
+  it("keeps the grant on errors other than 401", async () => {
+    annictFetch.mockResolvedValueOnce(new Response("boom", { status: 500 }));
+
+    const client = await connectClient();
+    const result = await client.callTool({ name: "annict_get_viewer", arguments: {} });
+    await client.close();
+
+    expect(result.isError).toBe(true);
+    expect(oauthProvider.revokeGrant).not.toHaveBeenCalled();
+  });
+
+  it("tells the caller how long to wait when Annict is rate limiting", async () => {
+    annictFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ errors: [{ type: "too_many_requests" }] }), {
+        status: 429,
+        headers: { "Retry-After": "42" },
+      }),
+    );
+
+    const client = await connectClient();
+    const result = await client.callTool({ name: "annict_get_viewer", arguments: {} });
+    await client.close();
+
+    expect(result.isError).toBe(true);
+    expect((result.content as Array<{ text: string }>)[0]!.text).toContain("retry after 42 seconds");
+    // 42s is beyond what is waited out in place, so no second request is sent.
+    expect(annictFetch).toHaveBeenCalledTimes(1);
+    expect(oauthProvider.revokeGrant).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AnnictClient } from "../src/client.js";
+import { AnnictRateLimitError } from "../src/errors.js";
+import { parseRetryAfter } from "../src/executor.js";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -90,5 +92,66 @@ describe("AnnictClient", () => {
     await expect(client.updateStatus({ workId: "w1", state: "WATCHING" })).rejects.toThrow(
       /did not return the updated state/,
     );
+  });
+});
+
+function rateLimitedResponse(retryAfter: string): Response {
+  return new Response(JSON.stringify({ errors: [{ type: "too_many_requests" }] }), {
+    status: 429,
+    headers: { "Content-Type": "application/json", "Retry-After": retryAfter },
+  });
+}
+
+describe("rate limiting", () => {
+  it("waits out a short Retry-After and retries once", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(rateLimitedResponse("3"))
+      .mockResolvedValueOnce(jsonResponse({ data: { viewer: { id: "u1" } } }));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const client = new AnnictClient({ accessToken: "token", fetch: fetchImpl, sleep });
+
+    await expect(client.getViewer()).resolves.toEqual({ id: "u1" });
+    expect(sleep).toHaveBeenCalledWith(3000);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws without waiting when Retry-After exceeds the limit", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(rateLimitedResponse("45"));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const client = new AnnictClient({ accessToken: "token", fetch: fetchImpl, sleep, rateLimitMaxWaitSeconds: 10 });
+
+    const error = await client.getViewer().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AnnictRateLimitError);
+    expect((error as AnnictRateLimitError).retryAfterSeconds).toBe(45);
+    expect((error as AnnictRateLimitError).message).toContain("retry after 45 seconds");
+    expect(sleep).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up when the retry is rate limited again", async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => rateLimitedResponse("1"));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const client = new AnnictClient({ accessToken: "token", fetch: fetchImpl, sleep });
+
+    await expect(client.getViewer()).rejects.toBeInstanceOf(AnnictRateLimitError);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("never retries when the wait is disabled", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(rateLimitedResponse("1"));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const client = new AnnictClient({ accessToken: "token", fetch: fetchImpl, sleep, rateLimitMaxWaitSeconds: 0 });
+
+    await expect(client.getViewer()).rejects.toBeInstanceOf(AnnictRateLimitError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses both forms of Retry-After", () => {
+    const now = Date.parse("2026-10-25T00:00:00Z");
+    expect(parseRetryAfter("30", now)).toBe(30);
+    expect(parseRetryAfter("Sun, 25 Oct 2026 00:00:20 GMT", now)).toBe(20);
+    expect(parseRetryAfter("garbage", now)).toBeNull();
+    expect(parseRetryAfter(null, now)).toBeNull();
   });
 });

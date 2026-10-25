@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { AnnictApiError, AnnictGraphQLError } from "../src/errors.js";
-import { execute } from "../src/executor.js";
+import { execute, type RateLimitPolicy } from "../src/executor.js";
+
+/** These cases never see a 429, so the policy is never consulted. */
+const NO_RETRY: RateLimitPolicy = { maxWaitSeconds: 0, sleep: async () => {} };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -13,7 +16,7 @@ describe("execute", () => {
   it("sends the query/variables and a lowercase bearer header", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ data: { ok: true } }));
 
-    await execute("https://api.annict.com/graphql", "token-123", "query { viewer { id } }", { a: 1 }, fetchImpl);
+    await execute("https://api.annict.com/graphql", "token-123", "query { viewer { id } }", { a: 1 }, fetchImpl, NO_RETRY);
 
     expect(fetchImpl).toHaveBeenCalledWith(
       "https://api.annict.com/graphql",
@@ -38,6 +41,7 @@ describe("execute", () => {
       "query {}",
       {},
       fetchImpl,
+      NO_RETRY,
     );
 
     expect(data).toEqual({ viewer: { id: "1" } });
@@ -46,7 +50,7 @@ describe("execute", () => {
   it("throws AnnictApiError on a non-2xx response", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("Not authorized", { status: 401 }));
 
-    await expect(execute("https://api.annict.com/graphql", "bad-token", "query {}", {}, fetchImpl)).rejects.toThrow(
+    await expect(execute("https://api.annict.com/graphql", "bad-token", "query {}", {}, fetchImpl, NO_RETRY)).rejects.toThrow(
       AnnictApiError,
     );
   });
@@ -54,7 +58,7 @@ describe("execute", () => {
   it("throws AnnictGraphQLError when the response body contains errors", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ errors: [{ message: "boom" }] }));
 
-    await expect(execute("https://api.annict.com/graphql", "token", "query {}", {}, fetchImpl)).rejects.toThrow(
+    await expect(execute("https://api.annict.com/graphql", "token", "query {}", {}, fetchImpl, NO_RETRY)).rejects.toThrow(
       AnnictGraphQLError,
     );
   });
@@ -62,7 +66,7 @@ describe("execute", () => {
   it("throws AnnictApiError when the response has neither data nor errors", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}));
 
-    await expect(execute("https://api.annict.com/graphql", "token", "query {}", {}, fetchImpl)).rejects.toThrow(
+    await expect(execute("https://api.annict.com/graphql", "token", "query {}", {}, fetchImpl, NO_RETRY)).rejects.toThrow(
       AnnictApiError,
     );
   });
